@@ -9,7 +9,10 @@ const nodemailer = require('nodemailer');
 // Setup email transporter (configure with your email service)
 // This is a basic example - adjust based on your email provider
 const emailTransporter = nodemailer.createTransport({
-  service: 'gmail', // or your email provider
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  family: 4,  // force IPv4 — Render can't reach Gmail over IPv6
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
