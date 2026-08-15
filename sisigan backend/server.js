@@ -1,6 +1,9 @@
 // server.js
 // Entry point — starts Express + Socket.IO server
 
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 require('dotenv').config();
 
 const http = require('http');
