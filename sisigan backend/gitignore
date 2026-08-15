@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Environment — NEVER commit this
+.env
+
+# Prisma generated
+prisma/dev.db
+prisma/*.db-journal
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

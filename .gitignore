@@ -1,0 +1,40 @@
+## Dependencies
+**/node_modules/
+
+## Prisma generated / local engine cache
+**/node_modules/.prisma/
+**/node_modules/.cache/prisma/
+
+## Vite caches/build outputs
+**/node_modules/.vite/
+**/dist/
+
+## Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+## Local env files
+.env
+.env.*
+
+## OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.code-workspace
+
+
+## Python
+analytics/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
+sisigan_db.sql
+
+sisigan_db.sql
+sisigan backend/prisma/mediumBlob photos.sql
+sisigan backend/prisma/seed.sql

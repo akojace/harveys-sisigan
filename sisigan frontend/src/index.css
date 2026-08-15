@@ -1,0 +1,90 @@
+/* src/index.css */
+:root {
+  --brown-950: #1c0a00;
+  --brown-900: #431407;
+  --brown-800: #7c2d12;
+  --brown-700: #9a3412;
+  --brown-600: #b45309;
+  --brown-500: #d97706;
+  --brown-300: #fcd34d;
+  --brown-100: #fef3c7;
+  --brown-50:  #fff8f0;
+
+  --cream:     #fffdf9;
+  --border:    #e5d0b0;
+  --border-light: #f5e8d0;
+
+  --text-dark:   #1c1917;
+  --text-mid:    #44403c;
+  --text-muted:  #78716c;
+  --text-faint:  #a8a29e;
+
+  --green:       #15803d;
+  --green-light: #D1FAE5;
+  --green-dark:  #065F46;
+  --red:         #dc2626;
+  --red-light:   #FEE2E2;
+  --red-dark:    #991B1B;
+  --blue-light:  #DBEAFE;
+  --blue-dark:   #1E40AF;
+
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  16px;
+  --radius-xl:  20px;
+  --radius-full: 9999px;
+
+  --shadow-sm:  0 1px 4px rgba(120,53,15,0.06);
+  --shadow-md:  0 6px 20px rgba(120,53,15,0.10);
+  --shadow-lg:  0 12px 40px rgba(120,53,15,0.14);
+  --shadow-xl:  0 24px 64px rgba(0,0,0,0.28);
+
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+
+  --nav-height: 78px;
+
+  --gradient-primary: linear-gradient(135deg, var(--brown-600) 0%, var(--brown-500) 100%);
+  --gradient-primary-hover: linear-gradient(135deg, var(--brown-700) 0%, var(--brown-600) 100%);
+  --transition-fast: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-med:  260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--brown-50);
+  color: var(--text-dark);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: var(--font-body); cursor: pointer; }
+input, select, textarea { font-family: var(--font-body); }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+
+/* Utility animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade  { animation: fadeIn 0.2s ease forwards; }
+.animate-slide { animation: slideUp 0.25s ease forwards; }
