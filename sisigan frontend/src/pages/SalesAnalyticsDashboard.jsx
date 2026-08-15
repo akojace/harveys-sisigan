@@ -5,7 +5,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const API = "http://localhost:8000/api";
+const API = "https://sisigan-analytics.ardpi.me/api";
 
 // TODO: replace with your real backend base URL / axios instance from
 // src/api/client.js. This is the Express + Prisma backend (port likely
