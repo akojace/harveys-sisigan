@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Button, Input } from '../components/ui'
 import logo from '../assets/LOGO/logo.jpg'
+import { authApi } from '../api/client'
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
@@ -38,17 +39,7 @@ export default function ForgotPasswordPage() {
     setSuccess('')
 
     try {
-      const response = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to request password reset')
-      }
+      await authApi.forgotPassword(email)
 
       setSuccess('Verification code sent to your email!')
       setStep(2)
@@ -66,17 +57,7 @@ export default function ForgotPasswordPage() {
     setSuccess('')
 
     try {
-      const response = await fetch('/api/auth/verify-reset-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code: verificationCode })
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Invalid or expired verification code')
-      }
+      await authApi.verifyResetCode(email, verificationCode)
 
       setSuccess('Code verified! Please enter your new password.')
       setStep(3)
@@ -107,21 +88,7 @@ export default function ForgotPasswordPage() {
     }
 
     try {
-      const response = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          code: verificationCode,
-          newPassword
-        })
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to reset password')
-      }
+      await authApi.resetPassword(email, verificationCode, newPassword)
 
       setSuccess('Password reset successfully! Redirecting to login...')
       setTimeout(() => navigate('/login'), 2000)
