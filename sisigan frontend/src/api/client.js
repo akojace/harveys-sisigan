@@ -1,7 +1,7 @@
 // src/api/client.js - UPDATED
 // Centralized API helper — all backend calls go through here
 
-const BASE = '/api'
+const BASE = `${import.meta.env.VITE_BACKEND_URL}/api`
 
 async function request(path, options = {}) {
   const token = localStorage.getItem('sisigan_token')
