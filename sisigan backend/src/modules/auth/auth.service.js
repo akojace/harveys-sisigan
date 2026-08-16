@@ -4,20 +4,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const prisma = require('../../config/db');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 
 // Setup email transporter (configure with your email service)
 // This is a basic example - adjust based on your email provider
-const emailTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  family: 4,  // force IPv4 — Render can't reach Gmail over IPv6
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-});
+const axios = require('axios');
+
+const MAILER_URL = process.env.MAILER_URL || 'https://ardpi.me/mailer.php';
+const MAILER_SECRET = process.env.MAILER_SECRET || 'spcdrs_mailer_k9x2mP7qR4nL8vT';
 
 // Generate a random 6-digit numeric code
 function generateResetCode() {
@@ -27,11 +20,7 @@ function generateResetCode() {
 // Send email with reset code
 async function sendResetEmail(email, code) {
   try {
-    await emailTransporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Harvey's Sisigan - Password Reset Code",
-      html: `
+    const html = `
         <div style="font-family: Arial, sans-serif; padding: 20px;">
           <h2 style="color: #8B4513;">Harvey's Special Crispy Sisig</h2>
           <p>Password Reset Request</p>
@@ -42,11 +31,23 @@ async function sendResetEmail(email, code) {
           <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
           <p style="font-size: 12px; color: #666;">Harvey's Special Crispy Sisig - Point of Sale System</p>
         </div>
-      `,
-    });
-    return true;
-  } catch (error) {
-    console.error('Error sending email:', error);
+    `;
+
+    const response = await axios.post(MAILER_URL, {
+      secret: MAILER_SECRET,
+      to: email,
+      subject: "Harvey's Sisigan - Password Reset Code",
+      html,
+      fromName: "Harvey's Special Crispy Sisig",
+    }, { timeout: 15000 });
+
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to send email');
+    }
+
+    console.log(`Email sent to ${email}`);
+  } catch (err) {
+    console.error('Error sending email:', err.message);
     throw new Error('Failed to send reset email');
   }
 }
