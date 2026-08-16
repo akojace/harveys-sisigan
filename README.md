@@ -1,5 +1,5 @@
 READ ME SISIGAN
-### CD both backend and frontend mga hindot
+### CD both backend and frontend
   Need niyo MySQL at Node.JS tyaka bago irun open niyo na XAMPP Apache at MySQL 
 
 ### Terminal 1 — Backend
