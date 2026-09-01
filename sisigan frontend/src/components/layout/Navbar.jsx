@@ -17,8 +17,14 @@ import inventory from '../../assets/ICONS/inventory.png'
 export default function Navbar() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  // ADDED — mobile nav collapses behind a hamburger toggle
-  const isMobile = useIsMobile()
+  // ADDED — mobile nav collapses behind a hamburger toggle. Breakpoint is
+  // 1024 (not the usual 768) because with up to 8 nav pills (OWNER role)
+  // plus the logo and user info, anything narrower than ~1050px doesn't
+  // have room to fit them on one line — they'd wrap to a second row and
+  // overflow outside the fixed-height navbar, overlapping page content
+  // below it. 1024 also conveniently covers tablets, which is a plus
+  // since this POS is likely used on a tablet at the counter too.
+  const isMobile = useIsMobile(1024)
   const [menuOpen, setMenuOpen] = useState(false)
 
   async function handleLogout() {
