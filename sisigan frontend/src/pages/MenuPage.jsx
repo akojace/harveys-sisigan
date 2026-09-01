@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { menuApi, inventoryApi } from '../api/client'
 import { Button, Input, Modal, Badge, EmptyState, Card } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 function AddItemModal({ categories, onClose, onSaved }) {
   const [form,    setForm]    = useState({ name: '', price: '', description: '', categoryId: categories[0]?.id || '' })
@@ -363,6 +364,7 @@ function RecipeManagerModal({ item, onClose }) {
 
 export default function MenuPage() {
   const { user } = useAuth()
+  const isMobile = useIsMobile()
   const [menu,       setMenu]      = useState([])
   const [activeTab,  setActiveTab] = useState(null)
   const [showAdd,    setShowAdd]   = useState(false)
@@ -395,8 +397,9 @@ export default function MenuPage() {
       )
     : categories.find(c => c.id === activeTab)?.items || []
 
+  // CHANGED — less horizontal padding on mobile
   return (
-    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: 28 }}>
+    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: isMobile ? '16px 12px' : 28 }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 14 }}>
         <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: 'var(--brown-800)' }}>Menu Management</h1>
@@ -428,6 +431,7 @@ export default function MenuPage() {
                 color:      activeTab === cat.id ? '#fff' : 'var(--brown-800)',
                 fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'all 200ms ease',
                 boxShadow: activeTab === cat.id ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
+                whiteSpace: 'nowrap',
               }}>
                 {cat.name} <span style={{ opacity: 0.7 }}>({cat.items.length})</span>
                 {disabledCount > 0 && (
@@ -451,6 +455,66 @@ export default function MenuPage() {
       {/* Items table */}
       {currentItems.length === 0 ? (
         <EmptyState icon="🍽️" title="No items in this category" />
+      ) : isMobile ? (
+        /* ADDED — mobile card layout. The desktop table below needs
+           1fr + 100px + 200px + 230px of fixed columns (~530px minimum
+           before the name column gets any space), which doesn't fit on
+           a phone — items would overflow or squeeze unreadably. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {currentItems.map(item => (
+            <div key={item.id} style={{
+              background: !item.isAvailable ? 'rgba(220,38,38,0.04)' : 'var(--cream)',
+              border: '1.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
+              padding: '14px 16px', boxShadow: 'var(--shadow-sm)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: item.isAvailable ? 'var(--text-dark)' : 'var(--text-faint)', textDecoration: !item.isAvailable ? 'line-through' : 'none' }}>
+                    {item.name}
+                  </div>
+                  <div style={{ fontWeight: 700, color: item.isAvailable ? 'var(--brown-700)' : 'var(--text-faint)', fontSize: 14, marginTop: 2 }}>
+                    ₱{Number(item.price).toFixed(2)}
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 'var(--radius-full)',
+                  background: item.isAvailable ? 'var(--green-light)' : 'var(--red-light)',
+                  color:      item.isAvailable ? 'var(--green-dark)'  : 'var(--red-dark)',
+                  flexShrink: 0,
+                }}>
+                  {item.isAvailable ? 'Available' : 'Disabled'}
+                </span>
+              </div>
+
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                {item.description || <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>No description</span>}
+              </div>
+
+              {canEdit && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setEditItem(item)}
+                    style={{ flex: 1, minWidth: 80, padding: '9px 10px', border: '1.5px solid var(--brown-300)', borderRadius: 'var(--radius-sm)', background: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: 'var(--brown-700)' }}
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    onClick={() => setRecipeItem(item)}
+                    style={{ flex: 1, minWidth: 80, padding: '9px 10px', border: '1.5px solid #6d28d9', borderRadius: 'var(--radius-sm)', background: '#f5f3ff', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#6d28d9' }}
+                  >
+                    🍲 Recipe
+                  </button>
+                  <button
+                    onClick={() => handleToggle(item.id)} disabled={toggling === item.id}
+                    style={{ flex: 1, minWidth: 80, padding: '9px 10px', border: `1.5px solid ${item.isAvailable ? 'var(--border)' : 'var(--green)'}`, borderRadius: 'var(--radius-sm)', background: item.isAvailable ? '#fff' : 'var(--green-light)', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: item.isAvailable ? 'var(--text-muted)' : 'var(--green-dark)' }}
+                  >
+                    {toggling === item.id ? '…' : item.isAvailable ? 'Disable' : '✓ Enable'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       ) : (
         <div style={{ background: 'var(--cream)', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
           <div style={{
