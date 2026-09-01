@@ -1,24 +1,38 @@
 // src/components/ui/ThermalReceipt.jsx
 // Thermal receipt generator — opens a print window sized for 80mm thermal paper
-// Call printReceipt(order, payment, branchName, discount) from anywhere
+// Call printReceipt(order, payments, branchName, discount) from anywhere
 //
-// CHANGED — added an optional 4th param `discount`, shape:
+// CHANGED — `payments` is now an ARRAY of tender rows (one per payment
+// method used), since an order can be settled with a split payment across
+// multiple methods (e.g. CASH short + GCASH covering the remainder). A
+// single-method payment is just an array with one entry. The receipt
+// prints one line per tender, then a combined CHANGE line.
+//
+// Also added an optional 4th param `discount`, shape:
 //   { label: string, percentage: number, deducted: number }
 // When present, the receipt now shows:
 //   Subtotal (original total)
 //   Discount line (label, percentage, amount deducted)
 //   TOTAL (after discount) — this is what's actually compared against amountPaid
 // When absent, the receipt renders exactly as before (no discount rows).
+//
+// ADDED — VAT breakdown (PH standard 12%, VAT-inclusive) is now printed
+// when the order carries vatableSales/vatAmount (every order created after
+// the tax feature shipped). Older orders without these fields simply don't
+// show the VAT lines.
 
-export function printReceipt(order, payment, branchName = 'Sisigan Restaurant', discount = null) {
+export function printReceipt(order, payments, branchName = 'Sisigan Restaurant', discount = null) {
   const items = order.items || []
+  // Normalize: accept either the new array or a legacy single payment object
+  const tenders = Array.isArray(payments) ? payments : [payments]
+
   // CHANGED — order.totalAmount is treated as the ORIGINAL (pre-discount) total,
   // matching how OrdersPage.jsx computes baseTotal / total in PaymentModal.
   const subtotal   = Number(order.totalAmount)
   const discounted = discount ? Math.max(0, subtotal - Number(discount.deducted)) : subtotal
-  const paid       = Number(payment.amountPaid)
-  const change     = Number(payment.change)
-  const now = new Date(payment.processedAt || new Date())
+  const paid       = tenders.reduce((s, p) => s + Number(p.amountPaid), 0)
+  const change     = tenders.reduce((s, p) => s + Number(p.change || 0), 0)
+  const now        = new Date(tenders[0]?.processedAt || new Date())
 
   const dateStr = now.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
   const timeStr = now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -41,9 +55,14 @@ export function printReceipt(order, payment, branchName = 'Sisigan Restaurant', 
     `
   }).join('')
 
-  const refLine = payment.referenceNo
-    ? `<div class="line">Ref No: ${payment.referenceNo}</div>`
-    : ''
+  // CHANGED — one row per tender, plus its reference number if it has one
+  const paymentRows = tenders.map(p => `
+    <div class="total-row">
+      <span>${p.method}</span>
+      <span>₱${Number(p.amountPaid).toFixed(2)}</span>
+    </div>
+    ${p.referenceNo ? `<div class="line">Ref (${p.method}): ${p.referenceNo}</div>` : ''}
+  `).join('')
 
   // ADDED — discount rows, only rendered when a discount was applied
   // In ThermalReceipt.jsx, replace the subtotalRow variable:
@@ -62,6 +81,16 @@ const subtotalRow = discount ? `
     <span>Normal</span>
   </div>
 `
+
+  // ADDED — VAT breakdown, only rendered when the order carries the fields
+  // (every order created after the tax feature shipped). VAT-inclusive:
+  // the discounted TOTAL above already includes this VAT, these two lines
+  // just break it out for the receipt, they don't add anything on top.
+  const vatRow = (order.vatableSales != null && order.vatAmount != null) ? `
+    <div class="line">VATable Sales: ₱${Number(order.vatableSales).toFixed(2)}</div>
+    <div class="line">VAT (${Number(order.taxRate ?? 12).toFixed(0)}%): ₱${Number(order.vatAmount).toFixed(2)}</div>
+  ` : ''
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -203,20 +232,18 @@ const subtotalRow = discount ? `
   <!-- TOTALS -->
   <!-- ADDED — Subtotal + Discount rows only appear when a discount was applied -->
   ${subtotalRow}
+  <!-- ADDED — VAT breakdown, only appears when the order carries tax fields -->
+  ${vatRow}
   <div class="total-row grand">
     <span>TOTAL</span>
     <span>₱${discounted.toFixed(2)}</span>
   </div>
-  <div class="total-row">
-    <span>${payment.method}</span>
-    <span>₱${paid.toFixed(2)}</span>
-  </div>
+  <!-- CHANGED — one row per tender (supports split payment across methods) -->
+  ${paymentRows}
   <div class="total-row change">
     <span>CHANGE</span>
     <span>₱${change.toFixed(2)}</span>
   </div>
-
-  ${refLine}
 
   <div class="divider"></div>
 

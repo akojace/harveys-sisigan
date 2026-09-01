@@ -25,6 +25,10 @@ const inputStyle = {
 }
 
 const MODAL_WIDTH = 460
+// CHANGED — wider modal specifically for the payment view per client
+// request ("mas malakihin at pagandahin sa mata"), since it now also
+// needs room for the split-payment panel.
+const PAY_MODAL_WIDTH = 560
 const narrowStyle = { maxWidth: 320, margin: '0 auto' }
 
 // ── 3-Dot Menu ────────────────────────────────────────
@@ -43,8 +47,10 @@ function OrderRowMenu({ order, onView, onPay, onReprint, onCancel, onReopen }) {
   }, [])
 
   const isCancellable = order.status !== 'CANCELLED' && order.status !== 'COMPLETED'
-  const canPay        = !order.payment && order.status !== 'CANCELLED' && order.status !== 'COMPLETED'
-  const canReprint    = order.status === 'COMPLETED' && order.payment
+  // CHANGED — order.payment is now order.payments (array); "has a payment"
+  // means the array is non-empty.
+  const canPay        = !order.payments?.length && order.status !== 'CANCELLED' && order.status !== 'COMPLETED'
+  const canReprint    = order.status === 'COMPLETED' && order.payments?.length > 0
   // Change 1: reopen only for CANCELLED, not COMPLETED
   const isReopenable  = order.status === 'CANCELLED'
 
@@ -176,7 +182,8 @@ function ReopenView({ order, onClose, onReopened }) {
     setLoading(true); setError('')
     try {
       await authApi.login(user.email, password)
-      let reopened = { ...order, status: 'PENDING', payment: null }
+      // CHANGED — order.payment is now order.payments (array)
+      let reopened = { ...order, status: 'PENDING', payments: [] }
       if (typeof ordersApi.reopen === 'function') {
         const result = await ordersApi.reopen(order.id)
         reopened = result?.data || reopened
@@ -216,45 +223,81 @@ function ReopenView({ order, onClose, onReopened }) {
 }
 
 // ── Payment View ───────────────────────────────────────
-function PaymentView({ order, baseTotal, total, method, setMethod, amountPaid, setAmountPaid, refNo, setRefNo, discount, onRemoveDiscount, onOpenDiscount, loading, error, onBack, onPay }) {
-  const paid            = Number(amountPaid) || 0
-  const change          = paid - total
-  const needsRef        = method !== 'CASH'
-  const nonCashOverpaid = method !== 'CASH' && paid > total
-  const canConfirm      = paid >= total && (!needsRef || refNo.trim().length > 0) && !nonCashOverpaid
+// CHANGED — redesigned larger/clearer per client request ("mas malakihin
+// at pagandahin sa mata"), and now supports split payment: when CASH is
+// short, a second payment method can be added to cover just the
+// remaining balance, auto-filled from the shortfall.
+function PaymentView({
+  order, baseTotal, total,
+  method, setMethod, amountPaid, setAmountPaid, refNo, setRefNo,
+  splitOpen, setSplitOpen, splitMethod, setSplitMethod, splitAmount, setSplitAmount, splitRefNo, setSplitRefNo,
+  discount, onRemoveDiscount, onOpenDiscount,
+  loading, error, onBack, onPay,
+}) {
+  const paid = Number(amountPaid) || 0
+
+  // Cash can fall short and be topped up by a second method. Non-cash
+  // methods are expected to be entered exact (no split off a non-cash
+  // shortfall — matches the client's described flow: cash short → second
+  // method covers the rest).
+  const shortfall     = method === 'CASH' ? Math.max(0, total - paid) : 0
+  const canSplit       = method === 'CASH' && shortfall > 0
+  const nonCashOverpaid = method !== 'CASH' && paid > total && !splitOpen
+
+  const splitPaid   = splitOpen ? (Number(splitAmount) || 0) : 0
+  const totalTendered = paid + splitPaid
+  const change       = totalTendered - total
+
+  const needsRef      = method !== 'CASH'
+  const needsSplitRef  = splitOpen
+
+  const canConfirm =
+    totalTendered >= total &&
+    (!needsRef || refNo.trim().length > 0) &&
+    (!needsSplitRef || splitRefNo.trim().length > 0) &&
+    !nonCashOverpaid
+
+  // Auto-fill the split amount with the exact shortfall whenever it changes
+  // (e.g. cashier edits the cash amount after opening the split panel).
+  function openSplit() {
+    setSplitOpen(true)
+    setSplitMethod('GCASH')
+    setSplitAmount(shortfall.toFixed(2))
+    setSplitRefNo('')
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ background: 'var(--brown-100)', borderRadius: 'var(--radius-md)', padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ color: 'var(--brown-800)', fontSize: 13.5 }}>{order.orderNumber}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, fontSize: 15 }}>
+      <div style={{ background: 'var(--brown-100)', borderRadius: 'var(--radius-lg)', padding: '18px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ color: 'var(--brown-800)', fontSize: 15, fontWeight: 600 }}>{order.orderNumber}</span>
         <div style={{ textAlign: 'right' }}>
           {discount && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
-              P{baseTotal.toFixed(2)}
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+              ₱{baseTotal.toFixed(2)}
             </div>
           )}
-          <span style={{ color: 'var(--brown-800)', fontWeight: 700, fontSize: 22, fontFamily: 'var(--font-display)' }}>
-            P{total.toFixed(2)}
+          <span style={{ color: 'var(--brown-800)', fontWeight: 700, fontSize: 30, fontFamily: 'var(--font-display)' }}>
+            ₱{total.toFixed(2)}
           </span>
         </div>
       </div>
 
       {discount ? (
-        <div style={{ background: 'var(--red-light)', borderRadius: 'var(--radius-md)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'var(--red-light)', borderRadius: 'var(--radius-lg)', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--red-dark)' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--red-dark)' }}>
               {PH_DISCOUNTS[discount.key]?.icon} {discount.label} ({discount.percentage}%)
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--red-dark)' }}>- ₱{discount.deducted.toFixed(2)} → New total: ₱{total.toFixed(2)}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--red-dark)' }}>- ₱{discount.deducted.toFixed(2)} → New total: ₱{total.toFixed(2)}</div>
           </div>
-          <button onClick={onRemoveDiscount} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red-dark)', fontWeight: 700, fontSize: 18, padding: '0 4px' }}>✕</button>
+          <button onClick={onRemoveDiscount} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red-dark)', fontWeight: 700, fontSize: 20, padding: '0 4px' }}>✕</button>
         </div>
       ) : (
         <button onClick={onOpenDiscount} style={{
-          width: '100%', padding: '10px 14px',
-          border: '1.5px dashed var(--border)', borderRadius: 'var(--radius-md)',
+          width: '100%', padding: '13px 16px',
+          border: '1.5px dashed var(--border)', borderRadius: 'var(--radius-lg)',
           background: '#fff', color: 'var(--brown-600)',
-          fontWeight: 700, fontSize: 13.5, cursor: 'pointer',
+          fontWeight: 700, fontSize: 14.5, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}>🏷️ Add Discount</button>
       )}
@@ -263,25 +306,25 @@ function PaymentView({ order, baseTotal, total, method, setMethod, amountPaid, s
         <label style={labelStyle}>Payment Method</label>
         <div style={{ display: 'flex', gap: 10 }}>
           {['CASH', 'GCASH', 'MAYA', 'CARD'].map(m => (
-            <button key={m} onClick={() => { setMethod(m); setRefNo(''); setAmountPaid('') }} style={{
-              flex: 1, padding: '10px 4px',
+            <button key={m} onClick={() => { setMethod(m); setRefNo(''); setAmountPaid(''); setSplitOpen(false) }} style={{
+              flex: 1, padding: '13px 4px',
               border: `2px solid ${method === m ? 'var(--brown-600)' : 'var(--border)'}`,
-              borderRadius: 'var(--radius-md)',
+              borderRadius: 'var(--radius-lg)',
               background: method === m ? 'var(--brown-600)' : '#fff',
               color: method === m ? '#fff' : 'var(--brown-700)',
-              fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 180ms ease',
+              fontWeight: 700, fontSize: 13.5, cursor: 'pointer', transition: 'all 180ms ease',
             }}>{m}</button>
           ))}
         </div>
       </div>
 
       <div>
-        <label style={labelStyle}>Amount Paid (P)</label>
+        <label style={labelStyle}>Amount Paid (₱)</label>
         <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
-          placeholder={`Minimum P${total.toFixed(2)}${method !== 'CASH' ? ` (max P${total.toFixed(2)})` : ''}`}
-          style={{ ...inputStyle, borderColor: nonCashOverpaid ? 'var(--red)' : undefined }} />
+          placeholder={`Minimum ₱${total.toFixed(2)}${method !== 'CASH' ? ` (max ₱${total.toFixed(2)})` : ''}`}
+          style={{ ...inputStyle, padding: '13px 14px', fontSize: 15, borderColor: nonCashOverpaid ? 'var(--red)' : undefined }} />
         {nonCashOverpaid && (
-          <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 4 }}>
+          <p style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 5 }}>
             {method} payments cannot exceed the payable amount of ₱{total.toFixed(2)}.
           </p>
         )}
@@ -291,32 +334,103 @@ function PaymentView({ order, baseTotal, total, method, setMethod, amountPaid, s
         <div>
           <label style={labelStyle}>{method} Reference No. *</label>
           <input value={refNo} onChange={e => setRefNo(e.target.value)}
-            placeholder={`Enter ${method} reference number`} style={inputStyle} />
+            placeholder={`Enter ${method} reference number`} style={{ ...inputStyle, padding: '13px 14px', fontSize: 15 }} />
         </div>
       )}
 
-      {paid > 0 && !nonCashOverpaid && (
-        <div style={{ background: change >= 0 ? 'var(--green-light)' : 'var(--red-light)', borderRadius: 'var(--radius-md)', padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ color: change >= 0 ? 'var(--green-dark)' : 'var(--red-dark)', fontSize: 13.5, fontWeight: 600 }}>
+      {/* CHANGED — split payment: when cash is short, offer a second method
+          to cover just the remainder, auto-filled to the exact shortfall. */}
+      {canSplit && !splitOpen && (
+        <button onClick={openSplit} style={{
+          width: '100%', padding: '13px 16px',
+          border: '1.5px dashed var(--brown-600)', borderRadius: 'var(--radius-lg)',
+          background: 'var(--brown-100)', color: 'var(--brown-700)',
+          fontWeight: 700, fontSize: 14, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          ➕ Complete remaining ₱{shortfall.toFixed(2)} with another method
+        </button>
+      )}
+
+      {splitOpen && (
+        <div style={{ border: '1.5px solid var(--brown-300, var(--border))', borderRadius: 'var(--radius-lg)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--brown-50)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--brown-800)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Second Payment Method</span>
+            <button onClick={() => { setSplitOpen(false); setSplitAmount(''); setSplitRefNo('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontWeight: 700, fontSize: 16 }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['GCASH', 'MAYA', 'CARD'].map(m => (
+              <button key={m} onClick={() => setSplitMethod(m)} style={{
+                flex: 1, padding: '10px 4px',
+                border: `2px solid ${splitMethod === m ? 'var(--brown-600)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-md)',
+                background: splitMethod === m ? 'var(--brown-600)' : '#fff',
+                color: splitMethod === m ? '#fff' : 'var(--brown-700)',
+                fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+              }}>{m}</button>
+            ))}
+          </div>
+          <div>
+            <label style={labelStyle}>Amount via {splitMethod} (₱)</label>
+            <input type="number" value={splitAmount} onChange={e => setSplitAmount(e.target.value)}
+              style={{ ...inputStyle, padding: '11px 14px' }} />
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+              Auto-filled with the ₱{shortfall.toFixed(2)} shortfall — adjust if needed.
+            </p>
+          </div>
+          <div>
+            <label style={labelStyle}>{splitMethod} Reference No. *</label>
+            <input value={splitRefNo} onChange={e => setSplitRefNo(e.target.value)}
+              placeholder={`Enter ${splitMethod} reference number`} style={{ ...inputStyle, padding: '11px 14px' }} />
+          </div>
+        </div>
+      )}
+
+      {totalTendered > 0 && !nonCashOverpaid && (
+        <div style={{ background: change >= 0 ? 'var(--green-light)' : 'var(--red-light)', borderRadius: 'var(--radius-lg)', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: change >= 0 ? 'var(--green-dark)' : 'var(--red-dark)', fontSize: 14.5, fontWeight: 600 }}>
             {change >= 0 ? 'Change' : 'Short by'}
           </span>
-          <span style={{ color: change >= 0 ? 'var(--green-dark)' : 'var(--red-dark)', fontWeight: 700, fontSize: 19 }}>
-            P{Math.abs(change).toFixed(2)}
+          <span style={{ color: change >= 0 ? 'var(--green-dark)' : 'var(--red-dark)', fontWeight: 700, fontSize: 22 }}>
+            ₱{Math.abs(change).toFixed(2)}
           </span>
         </div>
       )}
 
-      {needsRef && !refNo.trim() && paid >= total && !nonCashOverpaid && (
-        <p style={{ color: 'var(--brown-600)', fontSize: 12, margin: 0 }}>Reference number is required for {method} payments.</p>
-      )}
+      {error && <p style={{ color: 'var(--red)', fontSize: 13.5, margin: 0 }}>{error}</p>}
 
-      {error && <p style={{ color: 'var(--red)', fontSize: 13, margin: 0 }}>{error}</p>}
-
-      <div style={{ display: 'flex', gap: 12, paddingTop: 6 }}>
+      <div style={{ display: 'flex', gap: 12, paddingTop: 8 }}>
         <Button variant="outline" onClick={onBack} style={{ flex: '0 0 auto' }}>Cancel</Button>
         <Button variant="success" size="lg" fullWidth disabled={loading || !canConfirm} onClick={onPay}>
           {loading ? 'Processing...' : 'Confirm and Print Receipt'}
         </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Paid-Via Summary ────────────────────────────────────
+// ADDED — shared block for showing settled payment(s) on an order.
+// Renders one line per tender when an order was settled with a split
+// payment across multiple methods, instead of assuming a single payment.
+function PaidViaSummary({ order }) {
+  const payments = order.payments || []
+  if (payments.length === 0) return null
+
+  const totalPaid   = payments.reduce((s, p) => s + Number(p.amountPaid), 0)
+  const totalChange = payments.reduce((s, p) => s + Number(p.change || 0), 0)
+  const methods     = payments.map(p => p.method).join(' + ')
+
+  return (
+    <div style={{ background: 'var(--green-light)', borderRadius: 'var(--radius-md)', padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ color: 'var(--green-dark)', fontWeight: 700, marginBottom: 5, fontSize: 13.5 }}>Paid via {methods}</div>
+      {payments.map(p => (
+        <div key={p.id} style={{ color: 'var(--green-dark)', fontSize: 13, marginTop: 2 }}>
+          {p.method}: P{Number(p.amountPaid).toFixed(2)}{p.referenceNo ? ` (Ref: ${p.referenceNo})` : ''}
+        </div>
+      ))}
+      <div style={{ color: 'var(--green-dark)', fontSize: 13.5, marginTop: 4, fontWeight: 600 }}>
+        Total Paid: P{totalPaid.toFixed(2)} | Change: P{totalChange.toFixed(2)}
       </div>
     </div>
   )
@@ -350,17 +464,7 @@ function ViewOnlyDetail({ order }) {
           P{Number(order.totalAmount).toFixed(2)}
         </span>
       </div>
-      {order.payment && (
-        <div style={{ background: 'var(--green-light)', borderRadius: 'var(--radius-md)', padding: '14px 16px', marginBottom: 16 }}>
-          <div style={{ color: 'var(--green-dark)', fontWeight: 700, marginBottom: 5, fontSize: 13.5 }}>Paid via {order.payment.method}</div>
-          <div style={{ color: 'var(--green-dark)', fontSize: 13.5 }}>
-            Paid: P{Number(order.payment.amountPaid).toFixed(2)} | Change: P{Number(order.payment.change).toFixed(2)}
-          </div>
-          {order.payment.referenceNo && (
-            <div style={{ color: 'var(--green-dark)', fontSize: 12.5, marginTop: 3 }}>Ref: {order.payment.referenceNo}</div>
-          )}
-        </div>
-      )}
+      <PaidViaSummary order={order} />
       <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-faint)', textAlign: 'right' }}>
         {order.cashier?.name} | {new Date(order.createdAt).toLocaleString('en-PH')}
       </div>
@@ -400,22 +504,12 @@ function DetailView({ order, onPayNow, onCancelOrder, onReopenOrder, onReprint }
           P{Number(order.totalAmount).toFixed(2)}
         </span>
       </div>
-      {order.payment && (
-        <div style={{ background: 'var(--green-light)', borderRadius: 'var(--radius-md)', padding: '14px 16px', marginBottom: 18 }}>
-          <div style={{ color: 'var(--green-dark)', fontWeight: 700, marginBottom: 5, fontSize: 13.5 }}>Paid via {order.payment.method}</div>
-          <div style={{ color: 'var(--green-dark)', fontSize: 13.5 }}>
-            Paid: P{Number(order.payment.amountPaid).toFixed(2)} | Change: P{Number(order.payment.change).toFixed(2)}
-          </div>
-          {order.payment.referenceNo && (
-            <div style={{ color: 'var(--green-dark)', fontSize: 12.5, marginTop: 3 }}>Ref: {order.payment.referenceNo}</div>
-          )}
-        </div>
-      )}
+      <PaidViaSummary order={order} />
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        {!order.payment && order.status !== 'CANCELLED' && order.status !== 'COMPLETED' && (
+        {!order.payments?.length && order.status !== 'CANCELLED' && order.status !== 'COMPLETED' && (
           <Button variant="success" fullWidth onClick={onPayNow}>Pay Now</Button>
         )}
-        {order.status === 'COMPLETED' && order.payment && (
+        {order.status === 'COMPLETED' && order.payments?.length > 0 && (
           <Button variant="outline" fullWidth onClick={onReprint}>Reprint Receipt</Button>
         )}
         {isCancellable && <Button variant="danger" fullWidth onClick={onCancelOrder}>Cancel Order</Button>}
@@ -437,6 +531,11 @@ function OrderDetailModal({ orderId, onClose, onRefresh, autoOpenPay = false, in
   const [method,           setMethod]           = useState('CASH')
   const [amountPaid,       setAmountPaid]       = useState('')
   const [refNo,            setRefNo]            = useState('')
+  // ADDED — split payment (second tender) state
+  const [splitOpen,        setSplitOpen]        = useState(false)
+  const [splitMethod,      setSplitMethod]      = useState('GCASH')
+  const [splitAmount,      setSplitAmount]      = useState('')
+  const [splitRefNo,       setSplitRefNo]       = useState('')
   const [discount,         setDiscount]         = useState(null)
   const [discountSelected, setDiscountSelected] = useState('SENIOR')
   const [payLoading,       setPayLoading]       = useState(false)
@@ -448,19 +547,25 @@ function OrderDetailModal({ orderId, onClose, onRefresh, autoOpenPay = false, in
 
   useEffect(() => {
     if (!autoOpenPay || !order) return
-    if (!order.payment && order.status !== 'CANCELLED' && order.status !== 'COMPLETED') setView('pay')
+    // CHANGED — order.payment is now order.payments (array)
+    if (!order.payments?.length && order.status !== 'CANCELLED' && order.status !== 'COMPLETED') setView('pay')
   }, [autoOpenPay, order])
 
   function resetPaymentForm() {
-    setMethod('CASH'); setAmountPaid(''); setRefNo(''); setDiscount(null); setPayError('')
+    setMethod('CASH'); setAmountPaid(''); setRefNo('')
+    setSplitOpen(false); setSplitMethod('GCASH'); setSplitAmount(''); setSplitRefNo('')
+    setDiscount(null); setPayError('')
   }
 
   function handleReprint() {
-    if (!order?.payment) return
-    const d = order.payment.discountAmount
-      ? { label: order.payment.discountLabel, percentage: Number(order.payment.discountPercentage), deducted: Number(order.payment.discountAmount) }
+    // CHANGED — order.payment is now order.payments (array); reprint uses
+    // the full set of tenders that settled the order.
+    if (!order?.payments?.length) return
+    const first = order.payments[0]
+    const d = first.discountAmount
+      ? { label: first.discountLabel, percentage: Number(first.discountPercentage), deducted: Number(first.discountAmount) }
       : null
-    printReceipt({ ...order, cashier: order.cashier, branch: user?.branch }, order.payment, user?.branch?.name, d)
+    printReceipt({ ...order, cashier: order.cashier, branch: user?.branch }, order.payments, user?.branch?.name, d)
   }
 
   async function handlePay() {
@@ -468,13 +573,24 @@ function OrderDetailModal({ orderId, onClose, onRefresh, autoOpenPay = false, in
     const total = discount ? Math.max(0, baseTotal - discount.deducted) : baseTotal
     setPayLoading(true); setPayError('')
     try {
-      const payload = { method, amountPaid: Number(amountPaid) || 0 }
-      if (method !== 'CASH' && refNo.trim()) payload.referenceNo = refNo.trim()
-      if (discount) { payload.discountType = discount.key; payload.discountAmount = discount.deducted }
+      // CHANGED — build a `payments` array instead of a single method/amount,
+      // so a short CASH tender plus a second method (split payment) can be
+      // submitted together in one request.
+      const payments = [{ method, amountPaid: Number(amountPaid) || 0 }]
+      if (method !== 'CASH' && refNo.trim()) payments[0].referenceNo = refNo.trim()
+      if (splitOpen) {
+        payments.push({
+          method: splitMethod,
+          amountPaid: Number(splitAmount) || 0,
+          referenceNo: splitRefNo.trim() || undefined,
+        })
+      }
+      const payload = { payments }
+      if (discount) { payload.discountType = discount.key }
       const result = await ordersApi.pay(order.id, payload)
       printReceipt(
         { ...order, cashier: { name: user?.name }, branch: user?.branch },
-        result.data.payment,
+        result.data.payments,
         user?.branch?.name,
         discount
       )
@@ -508,7 +624,7 @@ function OrderDetailModal({ orderId, onClose, onRefresh, autoOpenPay = false, in
   }
 
   return (
-    <Modal title={titles[view]} onClose={modalClose} width={MODAL_WIDTH}>
+    <Modal title={titles[view]} onClose={modalClose} width={view === 'pay' ? PAY_MODAL_WIDTH : MODAL_WIDTH}>
       {view === 'viewonly' && <ViewOnlyDetail order={order} />}
       {view === 'detail' && (
         <DetailView
@@ -525,6 +641,10 @@ function OrderDetailModal({ orderId, onClose, onRefresh, autoOpenPay = false, in
           method={method} setMethod={setMethod}
           amountPaid={amountPaid} setAmountPaid={setAmountPaid}
           refNo={refNo} setRefNo={setRefNo}
+          splitOpen={splitOpen} setSplitOpen={setSplitOpen}
+          splitMethod={splitMethod} setSplitMethod={setSplitMethod}
+          splitAmount={splitAmount} setSplitAmount={setSplitAmount}
+          splitRefNo={splitRefNo} setSplitRefNo={setSplitRefNo}
           discount={discount}
           onRemoveDiscount={() => { setDiscount(null); setAmountPaid('') }}
           onOpenDiscount={() => setView('discount')}
@@ -697,10 +817,11 @@ export default function OrdersPage() {
       try {
         const d = await ordersApi.get(orderId)
         const order = d.data
-        if (order?.payment) {
+        // CHANGED — order.payment is now order.payments (array)
+        if (order?.payments?.length) {
           printReceipt(
             { ...order, cashier: order.cashier, branch: user?.branch },
-            order.payment,
+            order.payments,
             user?.branch?.name
           )
         }
