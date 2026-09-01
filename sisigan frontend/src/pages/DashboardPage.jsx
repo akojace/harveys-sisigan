@@ -1158,7 +1158,7 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
 
           {/* Period buttons + custom range picker */}
-          <div style={{ display: 'flex', gap: 6, position: 'relative', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', position: 'relative', alignItems: 'center' }}>
             {PERIODS.map(p => (
               <button key={p.value} onClick={() => handlePeriodClick(p.value)} style={{
                 padding: '10px 18px', borderRadius: 'var(--radius-full)', border: 'none',
@@ -1166,6 +1166,11 @@ export default function DashboardPage() {
                 color: period === p.value ? '#fff' : 'var(--brown-800)',
                 fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 200ms ease',
                 boxShadow: period === p.value ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
+                /* CHANGED — prevent label wrapping (was breaking "This Week"/
+                   "This Month" onto 2 lines while "Today"/"Custom" stayed
+                   1 line, making the pills different shapes) and give every
+                   pill the same minWidth so they're all a uniform size */
+                whiteSpace: 'nowrap', minWidth: 92, textAlign: 'center',
               }}>
                 {p.label}
               </button>
