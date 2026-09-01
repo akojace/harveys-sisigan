@@ -4,6 +4,7 @@ import { ordersApi, authApi } from '../api/client'
 import { Badge, Button, Modal, EmptyState } from '../components/ui'
 import { printReceipt } from '../components/ui/ThermalReceipt'
 import { useAuth } from '../context/AuthContext'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const STATUSES  = ['COMPLETED', 'CANCELLED']
 const PAGE_SIZE = 20
@@ -712,12 +713,54 @@ function Pagination({ page, totalPages, onChange }) {
 // ── Order Row ──────────────────────────────────────────
 // Change 2: eye button removed — view is now in the menu
 function OrderRow({ order, onAction }) {
+  // ADDED — the fixed-width column layout (Amount 90px + Date 150px +
+  // Status 90px + gaps) needs ~420px before "Order" gets any space at
+  // all, which doesn't fit on a phone. Mobile gets a stacked 2-line
+  // card instead of the column layout.
+  const isMobile = useIsMobile()
   const displayName = order.customerName
     ? `${order.customerName} - ${order.orderNumber}`
     : order.orderNumber
 
   const dateStr = new Date(order.createdAt).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })
   const timeStr = new Date(order.createdAt).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })
+
+  if (isMobile) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 8,
+        padding: '13px 14px', borderBottom: '1px solid var(--border-light)',
+        background: '#fff',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <OrderRowMenu
+            order={order}
+            onView={()    => onAction(order.id, 'viewonly')}
+            onPay={()     => onAction(order.id, 'pay')}
+            onReprint={()  => onAction(order.id, 'reprint')}
+            onCancel={()   => onAction(order.id, 'cancel')}
+            onReopen={()   => onAction(order.id, 'reopen')}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {displayName}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+              {order.items?.slice(0, 2).map(i => i.menuItem?.name).join(', ')}
+              {order.items?.length > 2 ? ` +${order.items.length - 2} more` : ''}
+            </div>
+          </div>
+          <Badge status={order.status} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 42 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{dateStr}, {timeStr}</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--brown-700)', fontSize: 15 }}>
+            ₱{Number(order.totalAmount).toFixed(2)}
+          </span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{
@@ -769,6 +812,7 @@ export default function OrdersPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const isMobile = useIsMobile()
 
   const [orders,         setOrders]         = useState([])
   const [filter,         setFilter]         = useState('COMPLETED')
@@ -852,7 +896,8 @@ export default function OrdersPage() {
 
   return (
     // Change 3: match Dashboard layout — 95% width, maxWidth 1800, padding 28
-    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: 28 }}>
+    // CHANGED — less horizontal padding on mobile
+    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: isMobile ? '16px 10px' : 28 }}>
 
       {/* Header — matches Dashboard h1 size and spacing */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
@@ -889,7 +934,9 @@ export default function OrdersPage() {
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+        {/* CHANGED — added flexWrap so From/To date inputs wrap to a
+            second line instead of overflowing horizontally on mobile */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>From</span>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
             style={{ ...inputStyle, width: 'auto', padding: '9px 12px', fontSize: 13 }} />
@@ -922,20 +969,24 @@ export default function OrdersPage() {
             borderRadius: 'var(--radius-lg)', overflow: 'hidden',
             boxShadow: 'var(--shadow-sm)',
           }}>
-            {/* List header */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '10px 18px', background: 'var(--brown-50)',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-              textTransform: 'uppercase', letterSpacing: 0.5,
-            }}>
-              <div style={{ width: 42, flexShrink: 0 }}>Menu</div>
-              <div style={{ flex: 1 }}>Order</div>
-              <div style={{ flexShrink: 0, minWidth: 90, textAlign: 'right' }}>Amount</div>
-              <div style={{ flexShrink: 0, minWidth: 150, textAlign: 'right' }}>Date & Time</div>
-              <div style={{ flexShrink: 0, width: 90, textAlign: 'right' }}>Status</div>
-            </div>
+            {/* List header — CHANGED: hidden on mobile since OrderRow
+                switches to a self-labeled stacked card layout there,
+                the fixed-width columns below don't apply */}
+            {!isMobile && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 18px', background: 'var(--brown-50)',
+                borderBottom: '1px solid var(--border)',
+                fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+                textTransform: 'uppercase', letterSpacing: 0.5,
+              }}>
+                <div style={{ width: 42, flexShrink: 0 }}>Menu</div>
+                <div style={{ flex: 1 }}>Order</div>
+                <div style={{ flexShrink: 0, minWidth: 90, textAlign: 'right' }}>Amount</div>
+                <div style={{ flexShrink: 0, minWidth: 150, textAlign: 'right' }}>Date & Time</div>
+                <div style={{ flexShrink: 0, width: 90, textAlign: 'right' }}>Status</div>
+              </div>
+            )}
 
             {paginated.map(order => (
               <OrderRow
