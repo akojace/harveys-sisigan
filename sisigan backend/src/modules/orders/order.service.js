@@ -30,6 +30,22 @@ const DISCOUNT_TYPES = {
   STUDENT: { label: 'Student',        percentage: 10 },
 };
 
+// ADDED — PH standard VAT rate. Menu prices are treated as VAT-inclusive
+// (the price on the menu is what the customer pays; VAT is broken out of
+// that number for the receipt/reports, not added on top). Stored per-order
+// as taxRate so historical orders stay accurate if the rate ever changes.
+const VAT_RATE = 12; // percent
+
+/**
+ * Splits a VAT-inclusive total into { vatableSales, vatAmount } at the
+ * given rate (default PH standard 12%).
+ */
+function computeVat(totalAmount, rate = VAT_RATE) {
+  const vatAmount = Math.round((totalAmount * rate) / (100 + rate) * 100) / 100;
+  const vatableSales = Math.round((totalAmount - vatAmount) * 100) / 100;
+  return { vatableSales, vatAmount, taxRate: rate };
+}
+
 // ─────────────────────────────────────────
 // CREATE ORDER
 // ─────────────────────────────────────────
@@ -76,6 +92,9 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
   // 3. Calculate total
   const totalAmount = orderItemsData.reduce((sum, i) => sum + i.subtotal, 0);
 
+  // ADDED — compute VAT breakdown from the VAT-inclusive total
+  const { vatableSales, vatAmount, taxRate } = computeVat(totalAmount);
+
   // 4. Generate order number
   const orderNumber = await generateOrderNumber(branchId);
 
@@ -89,6 +108,9 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
         customerName: customerName || null,
         notes: notes || null,
         totalAmount,
+        vatableSales,
+        vatAmount,
+        taxRate,
         branchId,
         cashierId,
         items: {
@@ -163,7 +185,7 @@ async function getOrders({ branchId, status, type, date, page = 1, limit = 20, u
         items: {
           include: { menuItem: { select: { id: true, name: true } } },
         },
-        payment: true,
+        payments: true,
         cashier: { select: { id: true, name: true } },
         branch: { select: { id: true, name: true } },
       },
@@ -193,7 +215,7 @@ async function getOrderById(orderId, { userRole, userBranchId }) {
       items: {
         include: { menuItem: true },
       },
-      payment: true,
+      payments: true,
       cashier: { select: { id: true, name: true } },
       branch: { select: { id: true, name: true, city: true, address: true } },
     },
@@ -250,7 +272,7 @@ async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId })
     data: { status: newStatus },
     include: {
       items:   { include: { menuItem: { select: { id: true, name: true } } } },
-      payment: true,
+      payments: true,
       branch:  { select: { id: true, name: true } },
     },
   });
@@ -273,19 +295,28 @@ async function cancelOrder(orderId, { userRole, userBranchId }) {
 
 /**
  * Process payment for a READY or PENDING order
- * Atomically creates Payment + sets order to COMPLETED
+ * Atomically creates one or more Payment rows + sets order to COMPLETED
  *
  * CHANGED — now accepts discountType (e.g. 'SENIOR', 'PWD', 'STUDENT').
  * The percentage discount is looked up server-side from DISCOUNT_TYPES
  * (never trusted from the client) and used to compute the actual amount
- * due, which amountPaid is validated against. The resulting discount
- * label/percentage/amount are persisted on the Payment record so reprints
- * and the sales report can show them later.
+ * due, which the tendered amount(s) are validated against. The resulting
+ * discount label/percentage/amount are persisted on every Payment row so
+ * reprints and the sales report can show them later.
+ *
+ * CHANGED — supports split/partial payment across multiple methods.
+ * `payments` is an array of tenders, e.g.
+ *   [{ method: 'CASH', amountPaid: 100 }, { method: 'GCASH', amountPaid: 16, referenceNo: '...' }]
+ * covering a case where cash falls short and a second method settles the
+ * remainder. A single-method payment is just an array with one entry —
+ * the old { method, amountPaid, referenceNo } shape at the top level is
+ * still accepted for backward compatibility and normalized into a
+ * one-element array below.
  */
-async function processPayment({ orderId, method, amountPaid, referenceNo, discountType }, { userRole, userBranchId }) {
+async function processPayment({ orderId, payments, method, amountPaid, referenceNo, discountType }, { userRole, userBranchId }) {
   const order = await prisma.order.findUnique({
     where: { id: Number(orderId) },
-    include: { payment: true },
+    include: { payments: true },
   });
 
   if (!order) throw { statusCode: 404, message: 'Order not found.' };
@@ -298,7 +329,16 @@ async function processPayment({ orderId, method, amountPaid, referenceNo, discou
     throw { statusCode: 400, message: 'Order is already completed and paid.' };
   }
 
-  const paid          = Number(amountPaid);
+  // Normalize: accept either the new `payments` array or the legacy
+  // single { method, amountPaid, referenceNo } shape.
+  const tenders = Array.isArray(payments) && payments.length > 0
+    ? payments
+    : [{ method, amountPaid, referenceNo }];
+
+  if (tenders.some((t) => !t.method || t.amountPaid == null)) {
+    throw { statusCode: 400, message: 'Each payment must include a method and amountPaid.' };
+  }
+
   const originalTotal = Number(order.totalAmount);
 
   // ADDED — validate discountType (if provided) and compute the deduction
@@ -322,45 +362,63 @@ async function processPayment({ orderId, method, amountPaid, referenceNo, discou
   // CHANGED — total due now factors in the discount, if any
   const total = discount ? Math.max(0, originalTotal - discount.amount) : originalTotal;
 
-  if (paid < total) {
+  // CHANGED — validate the SUM of all tenders against total due, not a
+  // single amountPaid. This is what makes split payment work: cash can be
+  // short as long as the combined tenders cover the total.
+  const totalTendered = tenders.reduce((sum, t) => sum + Number(t.amountPaid), 0);
+
+  if (totalTendered < total) {
     throw {
       statusCode: 400,
-      message: `Insufficient payment. Total is ₱${total.toFixed(2)}, paid ₱${paid.toFixed(2)}.`,
+      message: `Insufficient payment. Total is ₱${total.toFixed(2)}, paid ₱${totalTendered.toFixed(2)}.`,
     };
   }
 
-  const change = paid - total;
+  // Any overpayment is returned as change. Attribute it to the CASH tender
+  // if one exists (the normal case — change is physical cash handed back);
+  // otherwise fall back to the last tender, in case of an incidental
+  // overpayment on a non-cash method.
+  const overpayment = Math.round((totalTendered - total) * 100) / 100;
+  const cashIdx = tenders.findIndex((t) => t.method === 'CASH');
+  const changeIdx = cashIdx !== -1 ? cashIdx : tenders.length - 1;
 
-  const ops = []
-  if (order.payment) {
-    ops.push(prisma.payment.delete({ where: { orderId: Number(orderId) } }))
+  const paymentRows = tenders.map((t, idx) => ({
+    orderId: Number(orderId),
+    method: t.method,
+    amountPaid: Number(t.amountPaid),
+    change: idx === changeIdx ? overpayment : 0,
+    referenceNo: t.referenceNo || null,
+    // ADDED — persist discount fields (all null when no discount applied)
+    discountType: discount?.type || null,
+    discountLabel: discount?.label || null,
+    discountPercentage: discount?.percentage || null,
+    discountAmount: discount?.amount || null,
+  }));
+
+  // Clean up any prior payment rows for this order (e.g. a previously
+  // failed/incomplete attempt) before writing the final settled set —
+  // mirrors the old delete-then-create pattern, now over the whole set.
+  const ops = [];
+  if (order.payments.length > 0) {
+    ops.push(prisma.payment.deleteMany({ where: { orderId: Number(orderId) } }));
   }
   ops.push(
-    prisma.payment.create({
-      data: {
-        orderId: Number(orderId),
-        method,
-        amountPaid: paid,
-        change,
-        referenceNo: referenceNo || null,
-        // ADDED — persist discount fields (all null when no discount applied)
-        discountType: discount?.type || null,
-        discountLabel: discount?.label || null,
-        discountPercentage: discount?.percentage || null,
-        discountAmount: discount?.amount || null,
-      },
-    }),
+    prisma.payment.createMany({ data: paymentRows }),
     prisma.order.update({
       where: { id: Number(orderId) },
-      data:  { status: 'COMPLETED' },
+      data: { status: 'COMPLETED' },
+      include: { payments: true },
     }),
-  )
+  );
 
-  const results      = await prisma.$transaction(ops)
-  const payment      = results[results.length - 2]
-  const updatedOrder = results[results.length - 1]
+  const results = await prisma.$transaction(ops);
+  const updatedOrder = results[results.length - 1];
 
-  return { payment, order: updatedOrder, change };
+  return {
+    order: updatedOrder,
+    payments: updatedOrder.payments,
+    change: overpayment,
+  };
 }
 
 module.exports = {

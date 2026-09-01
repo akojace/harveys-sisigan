@@ -46,11 +46,34 @@ const statusValidation = [
 // CHANGED — added optional discountType validation. Only these three values
 // are accepted; the actual percentage/amount is computed server-side in
 // order.service.js, never trusted from the request.
+//
+// CHANGED — now accepts EITHER the legacy single-payment shape
+// (top-level method/amountPaid) OR a `payments` array for split payment
+// across multiple methods (e.g. CASH + GCASH covering a shortfall). A
+// custom validator enforces that exactly one of these shapes is present.
 const paymentValidation = [
+  body('payments')
+    .optional()
+    .isArray({ min: 1 })
+    .withMessage('payments must be a non-empty array.'),
+  body('payments.*.method')
+    .optional()
+    .isIn(['CASH', 'GCASH', 'MAYA', 'CARD'])
+    .withMessage('Each payment method must be CASH, GCASH, MAYA, or CARD.'),
+  body('payments.*.amountPaid')
+    .optional()
+    .isFloat({ min: 0.01 })
+    .withMessage('Each payment amountPaid must be a positive number.'),
+  body('payments.*.referenceNo')
+    .optional({ nullable: true })
+    .isString()
+    .trim(),
   body('method')
+    .optional()
     .isIn(['CASH', 'GCASH', 'MAYA', 'CARD'])
     .withMessage('Payment method must be CASH, GCASH, MAYA, or CARD.'),
   body('amountPaid')
+    .optional()
     .isFloat({ min: 0.01 })
     .withMessage('Amount paid must be a positive number.'),
   body('referenceNo')
@@ -61,6 +84,14 @@ const paymentValidation = [
     .optional({ nullable: true })
     .isIn(['SENIOR', 'PWD', 'STUDENT'])
     .withMessage('Discount type must be SENIOR, PWD, or STUDENT.'),
+  body().custom((_, { req }) => {
+    const hasPayments = Array.isArray(req.body.payments) && req.body.payments.length > 0;
+    const hasLegacy = req.body.method != null && req.body.amountPaid != null;
+    if (!hasPayments && !hasLegacy) {
+      throw new Error('Provide either a payments array or method + amountPaid.');
+    }
+    return true;
+  }),
 ];
  
 // ── Routes ────────────────────────────────────────────

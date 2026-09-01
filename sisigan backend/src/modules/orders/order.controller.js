@@ -127,10 +127,14 @@ async function processPayment(req, res, next) {
     // through to the service. discountAmount is intentionally NOT read here —
     // the service recalculates the deduction itself server-side so a client
     // can't submit an arbitrary discount amount.
-    const { method, amountPaid, referenceNo, discountType } = req.body;
+    //
+    // CHANGED — reads the new `payments` array (split payment across
+    // multiple methods) in addition to the legacy single method/amountPaid
+    // shape, which the service still accepts for backward compatibility.
+    const { payments, method, amountPaid, referenceNo, discountType } = req.body;
  
     const result = await orderService.processPayment(
-      { orderId: req.params.id, method, amountPaid, referenceNo, discountType },
+      { orderId: req.params.id, payments, method, amountPaid, referenceNo, discountType },
       { userRole: req.user.role, userBranchId: req.user.branchId }
     );
  

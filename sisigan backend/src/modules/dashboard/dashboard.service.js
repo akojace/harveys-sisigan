@@ -58,7 +58,7 @@ async function getDashboard({ period = 'today', from, to, branchId }, requesting
     prisma.order.findMany({
       where: orderWhere,
       include: {
-        payment: true,
+        payments: true,
         items: { include: { menuItem: { include: { category: true } } } },
         branch: { select: { id: true, name: true } },
       },
@@ -171,12 +171,17 @@ async function getDashboard({ period = 'today', from, to, branchId }, requesting
     paymentMap[m] = { method: m, count: 0, total: 0 };
   }
 
+  // CHANGED — an order can now have multiple payment rows (split payment
+  // across methods), so this sums across every payment row on every
+  // order rather than assuming one payment per order.
   for (const order of completedOrders) {
-    if (!order.payment) continue;
-    const m = order.payment.method;
-    if (!paymentMap[m]) paymentMap[m] = { method: m, count: 0, total: 0 };
-    paymentMap[m].count += 1;
-    paymentMap[m].total += Number(order.payment.amountPaid);
+    if (!order.payments || order.payments.length === 0) continue;
+    for (const p of order.payments) {
+      const m = p.method;
+      if (!paymentMap[m]) paymentMap[m] = { method: m, count: 0, total: 0 };
+      paymentMap[m].count += 1;
+      paymentMap[m].total += Number(p.amountPaid);
+    }
   }
   // Sort by total desc, alphabetical tiebreak (same convention as salesByBranch/salesByCategory)
   const paymentBreakdown = Object.values(paymentMap).sort((a, b) => b.total - a.total || a.method.localeCompare(b.method));
