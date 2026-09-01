@@ -1155,54 +1155,58 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Controls ────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* CHANGED — flattened into ONE flex row so every control (period
+            pills, custom-range pill, branch select, Sales/Profit Report,
+            refresh) wraps together as peers and packs lines evenly, instead
+            of the period-pills being their own nested wrapping box that
+            wrapped independently from the buttons after it (was causing
+            "Custom" to sit alone on its own line, then Sales Report/refresh
+            pushed down to a separate line below that). */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
 
-          {/* Period buttons + custom range picker */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', position: 'relative', alignItems: 'center' }}>
-            {PERIODS.map(p => (
-              <button key={p.value} onClick={() => handlePeriodClick(p.value)} style={{
-                padding: '10px 18px', borderRadius: 'var(--radius-full)', border: 'none',
-                background: period === p.value ? 'var(--gradient-primary)' : 'var(--brown-100)',
-                color: period === p.value ? '#fff' : 'var(--brown-800)',
-                fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 200ms ease',
-                boxShadow: period === p.value ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
-                /* CHANGED — prevent label wrapping (was breaking "This Week"/
-                   "This Month" onto 2 lines while "Today"/"Custom" stayed
-                   1 line, making the pills different shapes) and give every
-                   pill the same minWidth so they're all a uniform size */
-                whiteSpace: 'nowrap', minWidth: 92, textAlign: 'center',
-              }}>
-                {p.label}
-              </button>
-            ))}
+          {PERIODS.map(p => (
+            <button key={p.value} onClick={() => handlePeriodClick(p.value)} style={{
+              padding: '10px 18px', borderRadius: 'var(--radius-full)', border: 'none',
+              background: period === p.value ? 'var(--gradient-primary)' : 'var(--brown-100)',
+              color: period === p.value ? '#fff' : 'var(--brown-800)',
+              fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 200ms ease',
+              boxShadow: period === p.value ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
+              whiteSpace: 'nowrap', minWidth: 92, textAlign: 'center',
+            }}>
+              {p.label}
+            </button>
+          ))}
 
-            {/* Inline pill showing selected range */}
-            {customRangeLabel && (
-              <span
-                onClick={() => setShowRangePicker(true)}
-                title="Click to change range"
-                style={{
-                  fontSize: 11.5, fontWeight: 700, color: 'var(--brown-600)',
-                  background: 'var(--brown-50)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-full)', padding: '5px 12px',
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                }}
-              >
-                {customRangeLabel} ✎
-              </span>
-            )}
+          {/* Small relatively-positioned wrapper just for the dropdown anchor —
+              no flexWrap of its own, so it's a normal single flex item here */}
+          {(customRangeLabel || showRangePicker) && (
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              {customRangeLabel && (
+                <span
+                  onClick={() => setShowRangePicker(true)}
+                  title="Click to change range"
+                  style={{
+                    fontSize: 11.5, fontWeight: 700, color: 'var(--brown-600)',
+                    background: 'var(--brown-50)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {customRangeLabel} ✎
+                </span>
+              )}
 
-            {/* Date range dropdown —   now passes onReset so user can clear the range */}
-            {showRangePicker && (
-              <CustomRangePicker
-                startDate={customStart}
-                endDate={customEnd}
-                onChange={(s, e) => { setCustomStart(s); setCustomEnd(e) }}
-                onClose={() => setShowRangePicker(false)}
-                onReset={handleResetCustomRange}
-              />
-            )}
-          </div>
+              {showRangePicker && (
+                <CustomRangePicker
+                  startDate={customStart}
+                  endDate={customEnd}
+                  onChange={(s, e) => { setCustomStart(s); setCustomEnd(e) }}
+                  onClose={() => setShowRangePicker(false)}
+                  onReset={handleResetCustomRange}
+                />
+              )}
+            </div>
+          )}
 
           {/* Branch filter — Owner only */}
           {isOwner && (
@@ -1218,7 +1222,7 @@ export default function DashboardPage() {
             padding: '9px 18px', borderRadius: 'var(--radius-full)',
             border: '1.5px solid var(--border)', background: '#fff',
             color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
-            transition: 'all 180ms ease',
+            transition: 'all 180ms ease', whiteSpace: 'nowrap',
           }}>Sales Report</button>
 
           {/* ADDED — "Profit Report" button, owner/manager only (margins are sensitive) */}
@@ -1227,7 +1231,7 @@ export default function DashboardPage() {
               padding: '9px 18px', borderRadius: 'var(--radius-full)',
               border: '1.5px solid var(--border)', background: '#fff',
               color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
-              transition: 'all 180ms ease',
+              transition: 'all 180ms ease', whiteSpace: 'nowrap',
             }}>💰 Profit Report</button>
           )}
 
