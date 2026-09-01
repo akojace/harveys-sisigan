@@ -15,4 +15,7 @@ router.get('/branches', roleMiddleware('OWNER'), dashboardController.getBranches
 // Login/logout activity trail (owner and manager).
 router.get('/auth-logs', roleMiddleware('OWNER', 'MANAGER'), dashboardController.getAuthLogs);
 
+// Profit ("tubo") report — revenue, cost, profit per menu item over a period.
+router.get('/profit', roleMiddleware('OWNER', 'MANAGER'), dashboardController.getProfitReport);
+
 module.exports = router;

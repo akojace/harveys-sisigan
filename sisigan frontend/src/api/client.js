@@ -67,6 +67,11 @@ export const dashboardApi = {
     const q = new URLSearchParams(params).toString()
     return request(`/dashboard/auth-logs${q ? '?' + q : ''}`)
   },
+  // ADDED — profit ("tubo") report per menu item over a period
+  profit:    (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/dashboard/profit${q ? '?' + q : ''}`)
+  },
 }
 
 // ── Users ─────────────────────────────────────────────────

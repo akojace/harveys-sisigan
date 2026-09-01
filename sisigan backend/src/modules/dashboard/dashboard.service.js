@@ -368,4 +368,131 @@ async function getIngredientRecommendations({ items, branchId }, requestingUser)
   return { recommendations };
 }
 
-module.exports = { getDashboard, getBranches, getAuthLogs, getIngredientRecommendations };
+/**
+ * Profit ("tubo") report — revenue, ingredient cost, and profit per menu
+ * item over a period, plus overall totals. Cost is derived from the
+ * MenuItemRecipeIngredient recipe data linked under Menu > Recipes,
+ * multiplied by each ingredient's defaultPrice — nothing new to store,
+ * this just computes it.
+ *
+ * IMPORTANT — as of this writing most menu items don't have complete
+ * recipe/ingredient-price data yet (see check-recipe-completeness.js).
+ * Rather than silently treating missing cost as ₱0 (which would overstate
+ * profit), any item missing a recipe or missing a linked ingredient's
+ * price comes back with cost/profit = null and costKnown = false, and its
+ * revenue is separated out into `revenueWithUnknownCost` in the summary
+ * so the report is honest about what it doesn't know yet.
+ */
+async function getProfitReport({ period = 'today', from, to, branchId }, requestingUser) {
+  const { start, end } = getDateRange(period, from, to);
+
+  const scopedBranchId =
+    requestingUser.role === 'OWNER'
+      ? (branchId ? Number(branchId) : null)
+      : requestingUser.branchId;
+
+  const scopedCashierId = requestingUser.role === 'CASHIER' ? requestingUser.id : null;
+
+  const orderItems = await prisma.orderItem.findMany({
+    where: {
+      order: {
+        status: 'COMPLETED',
+        createdAt: { gte: start, lte: end },
+        ...(scopedBranchId && { branchId: scopedBranchId }),
+        ...(scopedCashierId && { cashierId: scopedCashierId }),
+      },
+    },
+    include: {
+      menuItem: {
+        include: { recipes: { include: { ingredient: true } } },
+      },
+    },
+  });
+
+  // Cache per-menu-item unit cost so it's only computed once even if the
+  // item appears across many order lines in this period.
+  const unitCostCache = {}; // menuItemId -> number | null (null = unknown)
+
+  function unitCostFor(menuItem) {
+    if (!menuItem) return null;
+    if (unitCostCache[menuItem.id] !== undefined) return unitCostCache[menuItem.id];
+
+    if (!menuItem.recipes || menuItem.recipes.length === 0) {
+      unitCostCache[menuItem.id] = null;
+      return null;
+    }
+    const anyMissingPrice = menuItem.recipes.some((r) => r.ingredient.defaultPrice == null);
+    if (anyMissingPrice) {
+      unitCostCache[menuItem.id] = null;
+      return null;
+    }
+    const cost = menuItem.recipes.reduce(
+      (sum, r) => sum + Number(r.quantity) * Number(r.ingredient.defaultPrice),
+      0
+    );
+    unitCostCache[menuItem.id] = cost;
+    return cost;
+  }
+
+  const itemMap = {}; // menuItemId -> aggregate row
+
+  for (const oi of orderItems) {
+    const mi = oi.menuItem;
+    const id = oi.menuItemId;
+    const name = mi?.name || 'Unknown';
+    const qty = oi.quantity;
+    const revenue = Number(oi.subtotal);
+    const unitCost = unitCostFor(mi);
+    const costKnown = unitCost != null;
+    const cost = costKnown ? unitCost * qty : null;
+    const profit = costKnown ? revenue - cost : null;
+
+    if (!itemMap[id]) {
+      itemMap[id] = { menuItemId: id, name, qtySold: 0, revenue: 0, cost: costKnown ? 0 : null, profit: costKnown ? 0 : null, costKnown };
+    }
+    itemMap[id].qtySold += qty;
+    itemMap[id].revenue += revenue;
+    if (costKnown) {
+      itemMap[id].cost += cost;
+      itemMap[id].profit += profit;
+    }
+  }
+
+  const items = Object.values(itemMap).map((i) => ({
+    ...i,
+    revenue: Math.round(i.revenue * 100) / 100,
+    cost: i.cost != null ? Math.round(i.cost * 100) / 100 : null,
+    profit: i.profit != null ? Math.round(i.profit * 100) / 100 : null,
+  }));
+
+  // Known-cost items first (highest profit first), unknown-cost items last
+  items.sort((a, b) => {
+    if (a.costKnown && !b.costKnown) return -1;
+    if (!a.costKnown && b.costKnown) return 1;
+    if (a.costKnown && b.costKnown) return b.profit - a.profit;
+    return b.revenue - a.revenue;
+  });
+
+  const totalRevenue = Math.round(items.reduce((s, i) => s + i.revenue, 0) * 100) / 100;
+  const totalKnownCost = Math.round(items.reduce((s, i) => s + (i.cost || 0), 0) * 100) / 100;
+  const totalKnownProfit = Math.round(items.reduce((s, i) => s + (i.profit || 0), 0) * 100) / 100;
+  const revenueWithUnknownCost = Math.round(
+    items.filter((i) => !i.costKnown).reduce((s, i) => s + i.revenue, 0) * 100
+  ) / 100;
+  const itemsMissingCost = items.filter((i) => !i.costKnown).map((i) => i.name);
+
+  return {
+    period: { label: period, start, end },
+    summary: {
+      totalRevenue,
+      totalKnownCost,
+      totalKnownProfit,
+      revenueWithUnknownCost,
+      itemsMissingCostCount: itemsMissingCost.length,
+    },
+    items,
+    itemsMissingCost,
+  };
+}
+
+module.exports = { getDashboard, getBranches, getAuthLogs, getIngredientRecommendations, getProfitReport };

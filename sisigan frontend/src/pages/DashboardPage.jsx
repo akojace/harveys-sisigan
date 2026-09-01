@@ -308,6 +308,106 @@ async function downloadSalesReportExcel(data, periodLabel, branchLabel) {
   await writeWorkbook(wb, `sales_report_${slug}_${new Date().toISOString().slice(0, 10)}.xlsx`)
 }
 
+// ADDED — Excel export for the Profit Report. Mirrors downloadSalesReportExcel's
+// structure/styling, but adds Cost and Profit columns, and clearly flags any
+// item whose cost isn't computable yet (missing recipe/ingredient price)
+// instead of silently showing ₱0 cost.
+async function downloadProfitReportExcel(data, periodLabel, branchLabel) {
+  const s = data?.summary || {}
+  const items = data?.items || []
+
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('Profit Report')
+  const logoId = await loadLogoImage(wb)
+
+  ws.columns = [
+    { width: 6 },   // #
+    { width: 34 },  // Meal / Item
+    { width: 12 },  // Qty Sold
+    { width: 18 },  // Revenue
+    { width: 18 },  // Cost
+    { width: 18 },  // Profit
+    { width: 22 },  // Status
+  ]
+
+  ws.getRow(1).height = 24
+  ws.getRow(2).height = 24
+  ws.getRow(3).height = 24
+
+  ws.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 64, height: 64 } })
+
+  ws.mergeCells('B1:G3')
+  const nameCell = ws.getCell('B1')
+  nameCell.value = "Harvey's Special Crispy Sisig"
+  nameCell.font = { bold: true, size: 20, name: 'Arial' }
+  nameCell.alignment = { vertical: 'middle', horizontal: 'left' }
+
+  ws.getCell('A5').value = 'Profit Report'
+  ws.getCell('A5').font = { bold: true, size: 14 }
+
+  ws.getCell('A6').value = 'Range:'
+  ws.getCell('B6').value = periodLabel
+  ws.getCell('A7').value = 'Branch:'
+  ws.getCell('B7').value = branchLabel
+  ws.getCell('A8').value = 'Generated:'
+  ws.getCell('B8').value = new Date().toLocaleString('en-PH')
+
+  ws.getCell('A10').value = 'TOTAL REVENUE (PHP)'
+  ws.getCell('B10').value = Number(s.totalRevenue || 0)
+  ws.getCell('A10').font = { bold: true }
+
+  ws.getCell('A11').value = 'TOTAL KNOWN PROFIT (PHP)'
+  ws.getCell('B11').value = Number(s.totalKnownProfit || 0)
+  ws.getCell('A11').font = { bold: true }
+
+  // ADDED — explicit note when some items' cost is unknown, so this
+  // spreadsheet is never mistaken for a complete profit picture
+  if (s.itemsMissingCostCount > 0) {
+    ws.getCell('A12').value =
+      `⚠ ${s.itemsMissingCostCount} item(s) have unknown cost (₱${Number(s.revenueWithUnknownCost || 0).toFixed(2)} in revenue not included in profit above) — add ingredient prices under Menu > Recipes to include them.`
+    ws.getCell('A12').font = { italic: true, color: { argb: 'FFB91C1C' } }
+    ws.mergeCells('A12:G12')
+  }
+
+  const headerRowIdx = 14
+  const headers = ['#', 'MEAL / ITEM', 'QTY SOLD', 'REVENUE (PHP)', 'COST (PHP)', 'PROFIT (PHP)', 'STATUS']
+  headers.forEach((h, i) => {
+    const cell = ws.getCell(headerRowIdx, i + 1)
+    cell.value = h
+    cell.font = { bold: true, color: { argb: 'FF78350F' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }
+    cell.border = { bottom: { style: 'medium', color: { argb: 'FFD97706' } } }
+  })
+
+  items.forEach((item, i) => {
+    const row = headerRowIdx + 1 + i
+    ws.getCell(row, 1).value = i + 1
+    ws.getCell(row, 2).value = item.name
+    ws.getCell(row, 3).value = Number(item.qtySold || 0)
+    ws.getCell(row, 4).value = Number(item.revenue || 0)
+    ws.getCell(row, 5).value = item.costKnown ? Number(item.cost) : 'Unknown'
+    ws.getCell(row, 6).value = item.costKnown ? Number(item.profit) : 'Unknown'
+    ws.getCell(row, 7).value = item.costKnown ? 'OK' : 'Missing recipe/price'
+    if (!item.costKnown) {
+      ;[5, 6, 7].forEach(c => { ws.getCell(row, c).font = { italic: true, color: { argb: 'FFB91C1C' } } })
+    }
+  })
+
+  const totalRow = headerRowIdx + 1 + items.length
+  ws.getCell(totalRow, 2).value = 'TOTAL'
+  ws.getCell(totalRow, 3).value = items.reduce((sum, i) => sum + Number(i.qtySold || 0), 0)
+  ws.getCell(totalRow, 4).value = Number(s.totalRevenue || 0)
+  ws.getCell(totalRow, 5).value = Number(s.totalKnownCost || 0)
+  ws.getCell(totalRow, 6).value = Number(s.totalKnownProfit || 0)
+  ;[2, 3, 4, 5, 6, 7].forEach(c => {
+    ws.getCell(totalRow, c).font = { bold: true }
+    ws.getCell(totalRow, c).border = { top: { style: 'medium', color: { argb: 'FFD97706' } } }
+  })
+
+  const slug = periodLabel.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+  await writeWorkbook(wb, `profit_report_${slug}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+}
+
 //   separate HTML builder for the itemized "Sales Report" (all meals bought in range)
 function buildSalesReportHTML(data, periodLabel, branchLabel) {
   const s = data?.summary || {}
@@ -711,6 +811,175 @@ function SalesReportModal({ branchId, branches, branchLabel, isOwner, onClose })
   )
 }
 
+// ADDED — Profit Report Modal. Same date-range pattern as SalesReportModal,
+// shows revenue/cost/profit per item, and clearly flags items whose cost
+// isn't computable yet (missing recipe or ingredient price under Menu >
+// Recipes) instead of hiding or guessing at the gap.
+function ProfitReportModal({ branchId, branchLabel, onClose }) {
+  const today = todayISO()
+  const [start, setStart] = useState(today)
+  const [end, setEnd] = useState(today)
+  const [reportData, setReportData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const rangeLabel = start === end ? start : `${start} to ${end}`
+  const isValidRange = start && end && start <= end
+
+  const fetchReport = useCallback(async () => {
+    if (!start || !end || start > end) return
+    setLoading(true)
+    try {
+      const params = { period: 'custom', from: start, to: end }
+      if (branchId) params.branchId = branchId
+      const res = await dashboardApi.profit(params)
+      setReportData(res.data)
+    } finally {
+      setLoading(false)
+    }
+  }, [start, end, branchId])
+
+  useEffect(() => { fetchReport() }, [fetchReport])
+
+  function handleResetRange() {
+    setStart(today)
+    setEnd(today)
+  }
+
+  const s = reportData?.summary || {}
+  const items = reportData?.items || []
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(28,10,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900,
+      padding: 24,
+    }}>
+      <div style={{
+        background: 'var(--cream)', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 860,
+        maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        boxShadow: 'var(--shadow-xl)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '18px 22px', borderBottom: '1.5px solid var(--border)',
+        }}>
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--brown-800)' }}>
+              💰 Profit Report
+            </h2>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>{branchLabel}</p>
+          </div>
+          <button onClick={onClose} style={{
+            border: 'none', background: 'var(--brown-50)', fontSize: 16, cursor: 'pointer', color: 'var(--text-muted)',
+            borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>✕</button>
+        </div>
+
+        {/* Date range controls */}
+        <div style={{
+          display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
+          padding: '16px 22px', borderBottom: '1.5px solid var(--border)',
+        }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
+            From
+            <input type="date" value={start} max={end}
+              onChange={e => setStart(e.target.value)} style={dateInputStyle} />
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
+            To
+            <input type="date" value={end} min={start} max={today}
+              onChange={e => setEnd(e.target.value)} style={dateInputStyle} />
+          </label>
+          <button onClick={handleResetRange} style={{
+            padding: '9px 16px', borderRadius: 'var(--radius-full)',
+            border: '1.5px dashed var(--border)', background: 'transparent',
+            color: 'var(--text-muted)', fontWeight: 600, fontSize: 12.5, cursor: 'pointer',
+          }}>↺ Reset to Today</button>
+
+          <div style={{ flex: 1 }} />
+
+          <button onClick={() => downloadProfitReportExcel(reportData, rangeLabel, branchLabel)} disabled={!reportData}
+            style={{
+              padding: '9px 18px', borderRadius: 'var(--radius-full)',
+              border: '1.5px solid var(--border)', background: '#fff',
+              color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5,
+              cursor: reportData ? 'pointer' : 'not-allowed', opacity: reportData ? 1 : 0.5,
+            }}>📊 Excel</button>
+        </div>
+
+        {!isValidRange && (
+          <div style={{ padding: '12px 22px', fontSize: 12.5, color: '#dc2626' }}>
+            "To" date must be on or after "From" date.
+          </div>
+        )}
+
+        <div style={{ overflowY: 'auto', padding: '18px 22px' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 44, color: 'var(--text-muted)' }}>Loading report…</div>
+          ) : items.length ? (
+            <>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                <StatCard label="Total Revenue" value={fmt(s.totalRevenue || 0)} />
+                <StatCard label="Known Profit" value={fmt(s.totalKnownProfit || 0)} color="var(--green-dark)" />
+                <StatCard label="Known Cost" value={fmt(s.totalKnownCost || 0)} />
+              </div>
+
+              {/* ADDED — explicit warning banner when some items' cost is
+                  unknown, so this never gets mistaken for the complete
+                  profit picture */}
+              {s.itemsMissingCostCount > 0 && (
+                <div style={{
+                  background: 'var(--red-light, #fee2e2)', border: '1px solid #fca5a5',
+                  borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16,
+                  fontSize: 12.5, color: '#991b1b',
+                }}>
+                  ⚠ {s.itemsMissingCostCount} item(s) below have unknown cost — ₱{fmt(s.revenueWithUnknownCost || 0).replace('₱', '')} in revenue isn't reflected in the profit total above.
+                  Add ingredient prices under <strong>Menu &gt; Recipes</strong> to include them.
+                </div>
+              )}
+
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+                <thead>
+                  <tr style={{ background: 'var(--brown-50)' }}>
+                    {['#', 'Meal / Item', 'Qty', 'Revenue', 'Cost', 'Profit'].map(h => (
+                      <th key={h} style={{
+                        padding: '11px 14px',
+                        textAlign: h === '#' || h === 'Qty' ? 'center' : h === 'Meal / Item' ? 'left' : 'right',
+                        fontWeight: 700, color: 'var(--text-muted)',
+                        borderBottom: '1px solid var(--border)',
+                        fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5,
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, i) => (
+                    <tr key={item.menuItemId} style={{ borderBottom: '1px solid var(--border-light)', opacity: item.costKnown ? 1 : 0.65 }}>
+                      <td style={{ padding: '11px 14px', textAlign: 'center', color: 'var(--text-faint)', fontWeight: 700 }}>{i + 1}</td>
+                      <td style={{ padding: '11px 14px', fontWeight: 600, color: 'var(--text-dark)' }}>{item.name}</td>
+                      <td style={{ padding: '11px 14px', textAlign: 'center', fontWeight: 700, color: 'var(--brown-700)' }}>{item.qtySold}</td>
+                      <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>{fmt(item.revenue)}</td>
+                      <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 600, color: 'var(--text-mid)' }}>
+                        {item.costKnown ? fmt(item.cost) : <span style={{ color: '#b91c1c', fontStyle: 'italic', fontWeight: 600 }}>Unknown</span>}
+                      </td>
+                      <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 700, color: item.costKnown ? 'var(--brown-800)' : '#b91c1c' }}>
+                        {item.costKnown ? fmt(item.profit) : <span style={{ fontStyle: 'italic' }}>Missing recipe/price</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <EmptyState icon="💰" title="No completed sales in this date range" />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── StatCard ───────────────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, color = 'var(--brown-800)', icon }) {
   return (
@@ -774,6 +1043,8 @@ function ChartTooltip({ active, payload, label, prefix = '₱' }) {
 export default function DashboardPage() {
   const { user } = useAuth()
   const isOwner = user?.role === 'OWNER'
+  // ADDED — profit report is sensitive (margins), restrict same as backend
+  const canSeeProfits = user?.role === 'OWNER' || user?.role === 'MANAGER'
 
   const [data, setData] = useState(null)
   const [branches, setBranches] = useState([])
@@ -788,6 +1059,8 @@ export default function DashboardPage() {
 
   // state for the print-preview modal (main dashboard export) and the sales report modal
   const [showSalesReport, setShowSalesReport] = useState(false)
+  // ADDED
+  const [showProfitReport, setShowProfitReport] = useState(false)
 
   useEffect(() => {
     if (isOwner) {
@@ -937,6 +1210,16 @@ export default function DashboardPage() {
             color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
             transition: 'all 180ms ease',
           }}>Sales Report</button>
+
+          {/* ADDED — "Profit Report" button, owner/manager only (margins are sensitive) */}
+          {canSeeProfits && (
+            <button onClick={() => setShowProfitReport(true)} style={{
+              padding: '9px 18px', borderRadius: 'var(--radius-full)',
+              border: '1.5px solid var(--border)', background: '#fff',
+              color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+              transition: 'all 180ms ease',
+            }}>💰 Profit Report</button>
+          )}
 
           <Button variant="outline" size="sm" onClick={load}>↻</Button>
         </div>
@@ -1097,6 +1380,15 @@ export default function DashboardPage() {
           branchLabel={branchLabel}
           isOwner={isOwner}
           onClose={() => setShowSalesReport(false)}
+        />
+      )}
+
+      {/* ADDED — Profit Report modal — revenue/cost/profit per item, adjustable date range */}
+      {showProfitReport && (
+        <ProfitReportModal
+          branchId={branchId}
+          branchLabel={branchLabel}
+          onClose={() => setShowProfitReport(false)}
         />
       )}
     </div>

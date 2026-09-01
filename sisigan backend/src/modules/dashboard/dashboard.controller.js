@@ -30,4 +30,15 @@ async function getAuthLogs(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getDashboard, getBranches, getAuthLogs };
+async function getProfitReport(req, res, next) {
+  try {
+    const { period, from, to, branchId } = req.query;
+    const data = await dashboardService.getProfitReport(
+      { period, from, to, branchId },
+      req.user
+    );
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+module.exports = { getDashboard, getBranches, getAuthLogs, getProfitReport };
