@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { dashboardApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { Button, EmptyState } from '../components/ui'
+import { useIsMobile } from '../hooks/useIsMobile'
 import ExcelJS from 'exceljs'
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -1045,6 +1046,9 @@ export default function DashboardPage() {
   const isOwner = user?.role === 'OWNER'
   // ADDED — profit report is sensitive (margins), restrict same as backend
   const canSeeProfits = user?.role === 'OWNER' || user?.role === 'MANAGER'
+  // ADDED — stack the two-column chart grids into one column on narrow
+  // screens instead of squeezing charts into unusably narrow columns
+  const isMobile = useIsMobile()
 
   const [data, setData] = useState(null)
   const [branches, setBranches] = useState([])
@@ -1135,8 +1139,9 @@ export default function DashboardPage() {
 
   const s = data?.summary || {}
 
+  // CHANGED — less horizontal padding on mobile so narrow screens keep more usable width
   return (
-    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: 28 }}>
+    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: isMobile ? '16px 12px' : 28 }}>
 
       {/* ── Header ────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28, flexWrap: 'wrap', gap: 14 }}>
@@ -1244,7 +1249,9 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Charts row 1 ──────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+      {/* CHANGED — stack to 1 column on mobile instead of squeezing two
+          charts (esp. the pie chart + legend) into narrow columns */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 18, marginBottom: 18 }}>
         <Section title="📈 Sales Trend" style={{ height: 420 }}>
           {data?.salesTrend?.length ? (
             <ResponsiveContainer width="100%" height={320}>
@@ -1286,7 +1293,8 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Charts row 2 ──────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, marginBottom: 18 }}>
+      {/* CHANGED — stack to 1 column on mobile */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 18, marginBottom: 18 }}>
         <Section title="🏆 Best Sellers (by quantity)" style={{ height: 360 }}>
           {data?.bestSellers?.length ? (
             <ResponsiveContainer width="100%" height={260}>
