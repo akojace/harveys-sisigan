@@ -1263,9 +1263,16 @@ export default function DashboardPage() {
           {data?.salesByCategory?.length ? (
             <ResponsiveContainer width="100%" height={320}>
               <PieChart>
+                {/* CHANGED — only render the inline label for slices with
+                    actual share; a 0%-value slice has no angular span, so
+                    its label anchor collapses onto the same point as every
+                    other 0% slice, stacking overlapping text on the chart.
+                    Every category (including 0%) still appears in the
+                    Legend below, so nothing is hidden — this just stops
+                    drawing unreadable overlapping text for empty slices. */}
                 <Pie data={data.salesByCategory} dataKey="value" nameKey="name"
                   cx="50%" cy="50%" outerRadius={100}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''}
                   labelLine={false}
                 >
                   {data.salesByCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
