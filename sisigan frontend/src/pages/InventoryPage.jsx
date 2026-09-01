@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { inventoryApi, reportsApi, dashboardApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { Button, EmptyState, Modal, Input } from '../components/ui'
 import {
   ResponsiveContainer,
@@ -40,6 +41,7 @@ function Section({ title, right, children }) {
 }
 
 function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
+  const isMobile = useIsMobile()
   const [form, setForm] = useState({
     name: '',
     category: 'SAUCE',
@@ -89,7 +91,7 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Input label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Oyster Sauce" />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <div>
             <label style={lbl}>Category</label>
             <select value={form.category} onChange={(e) => set('category', e.target.value)} style={selectStyle}>
@@ -114,17 +116,17 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <Input label="Quantity" type="number" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} />
           <Input label="Min Threshold" type="number" value={form.minThreshold} onChange={(e) => set('minThreshold', e.target.value)} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <Input label="Price (optional)" type="number" value={form.price} onChange={(e) => set('price', e.target.value)} />
           <Input label="Consumption Days" type="number" value={form.consumptionRateDays} onChange={(e) => set('consumptionRateDays', e.target.value)} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <Input label="Consumption Label" value={form.consumptionLabel} onChange={(e) => set('consumptionLabel', e.target.value)} placeholder="e.g. Daily" />
           <Input label="Daily Deduction" type="number" value={form.dailyDeductionAmount} onChange={(e) => set('dailyDeductionAmount', e.target.value)} />
         </div>
@@ -147,6 +149,7 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
 // quantity. It always ADDS to the current amount; it never lets you set an
 // exact value or deduct, since that's not this section's job.
 function AddQuantitySection({ inventory, isOwner, onSaved }) {
+  const isMobile = useIsMobile()
   const [itemId, setItemId] = useState('')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
@@ -193,7 +196,10 @@ function AddQuantitySection({ inventory, isOwner, onSaved }) {
 
   return (
     <Section title="Add Quantity">
-      <div style={{ display: 'grid', gridTemplateColumns: isOwner ? '2fr 1fr 1fr auto' : '2fr 1fr auto', gap: 10, alignItems: 'end' }}>
+      {/* CHANGED — stack to 1 column on mobile; the fixed 'auto' button
+          column plus 2-3 other columns had no overflow protection and
+          would squeeze selects/inputs unreadably narrow on a phone */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (isOwner ? '2fr 1fr 1fr auto' : '2fr 1fr auto'), gap: 10, alignItems: 'end' }}>
         <div>
           <label style={lbl}>Ingredient</label>
           <select value={itemId} onChange={(e) => setItemId(e.target.value)} style={selectStyle}>
@@ -234,6 +240,7 @@ function AddQuantitySection({ inventory, isOwner, onSaved }) {
 export default function InventoryPage() {
   const { user } = useAuth()
   const isOwner = user?.role === 'OWNER'
+  const isMobile = useIsMobile()
 
   const [loading, setLoading] = useState(true)
   const [branchId, setBranchId] = useState('')
@@ -308,8 +315,9 @@ export default function InventoryPage() {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--text-muted)' }}>Loading inventory insights...</div>
   }
 
+  // CHANGED — less horizontal padding on mobile
   return (
-    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: 28 }}>
+    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: isMobile ? '16px 12px' : 28 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 14 }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: 'var(--brown-800)', marginBottom: 4 }}>Inventory Insights</h1>

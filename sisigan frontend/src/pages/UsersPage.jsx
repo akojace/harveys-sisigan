@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { usersApi, dashboardApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { Button, Input, Modal, EmptyState } from '../components/ui'
 
 const ROLE_COLORS = {
@@ -212,6 +213,7 @@ function ResetPasswordModal({ user, onClose }) {
 // ─── USERS PAGE ───────────────────────────────────────────
 export default function UsersPage() {
   const { user: me } = useAuth()
+  const isMobile = useIsMobile()
   const [users, setUsers] = useState([])
   const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
@@ -257,7 +259,8 @@ export default function UsersPage() {
   const fmtDateTime = (value) => new Date(value).toLocaleString('en-PH')
 
   return (
-    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: 28 }}>
+    // CHANGED — less horizontal padding on mobile
+    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: isMobile ? '16px 12px' : 28 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 26, flexWrap: 'wrap', gap: 14 }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: 'var(--brown-800)' }}>Accounts</h1>
@@ -277,6 +280,7 @@ export default function UsersPage() {
             color: filterRole === r ? '#fff' : 'var(--brown-800)',
             fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 200ms ease',
             boxShadow: filterRole === r ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
+            whiteSpace: 'nowrap',
           }}>{r} {r !== 'ALL' ? `(${users.filter(u => u.role === r).length})` : `(${users.length})`}</button>
         ))}
       </div>
@@ -286,6 +290,64 @@ export default function UsersPage() {
         <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-faint)' }}>Loading accounts…</div>
       ) : filtered.length === 0 ? (
         <EmptyState icon="👤" title="No accounts found" />
+      ) : isMobile ? (
+        /* ADDED — mobile card layout. The desktop table needs
+           1fr 1fr 120px 160px 110px 130px (~520px fixed minimum), which
+           doesn't fit on a phone. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filtered.map(u => (
+            <div key={u.id} style={{
+              background: 'var(--cream)', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
+              padding: '14px 16px', boxShadow: 'var(--shadow-sm)',
+              opacity: !u.isActive ? 0.6 : 1,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-dark)' }}>
+                    {u.name} {u.id === me?.id && <span style={{ fontSize: 11, color: 'var(--brown-500)' }}>(you)</span>}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2, wordBreak: 'break-all' }}>{u.email}</div>
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 'var(--radius-full)', flexShrink: 0,
+                  background: u.isActive ? 'var(--green-light)' : 'var(--red-light)',
+                  color: u.isActive ? 'var(--green-dark)' : 'var(--red-dark)',
+                }}>
+                  {u.isActive ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <RoleBadge role={u.role} />
+                  <span style={{ fontSize: 12.5, color: 'var(--text-mid)' }}>{u.branch?.name || '—'}</span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {(me?.role === 'OWNER' || u.role === 'CASHIER') && (
+                    <>
+                      <button onClick={() => setEditUser(u)} style={actionBtn} title="Edit">✏️</button>
+                      <button onClick={() => setResetUser(u)} style={actionBtn} title="Reset password">🔑</button>
+                      {u.id !== me?.id && (
+                        <button
+                          onClick={() => handleToggle(u.id)}
+                          disabled={toggling === u.id}
+                          style={{ ...actionBtn, color: u.isActive ? 'var(--red)' : 'var(--green)' }}
+                          title={u.isActive ? 'Deactivate' : 'Activate'}
+                        >
+                          {toggling === u.id ? '…' : u.isActive ? '🚫' : '✅'}
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {me?.role === 'MANAGER' && u.role !== 'CASHIER' && u.id !== me?.id && (
+                    <span title="No permission to edit this account" style={{ fontSize: 16, opacity: 0.35 }}>🔒</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div style={{ background: 'var(--cream)', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
           {/* Table header */}
