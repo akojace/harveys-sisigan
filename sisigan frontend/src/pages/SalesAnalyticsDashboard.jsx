@@ -808,11 +808,11 @@ export default function SalesAnalyticsDashboard() {
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
 
-      {/* Tab bar — CHANGED: added flexWrap + whiteSpace: nowrap on the
-          pills (same fix as Dashboard/Menu/Forecast page tabs) so
-          "🍽️ Menu Items" doesn't wrap its text onto 2 lines and the row
-          wraps as whole pills instead of overflowing on mobile; also
-          less horizontal padding on mobile */}
+      {/* Tab bar — CHANGED: added flexWrap + whiteSpace: nowrap + a shared
+          minWidth (same fix as Dashboard's period pills) so all 4 tabs are
+          a uniform pill size regardless of label length, instead of each
+          one sizing to fit only its own text ("Trends" much narrower than
+          "🍽️ Menu Items"); also less horizontal padding on mobile */}
       <div style={{
         background: "#fff", borderBottom: `1px solid ${C.grid}`,
         padding: isMobile ? "14px 14px" : "16px 32px", display: "flex", gap: 8, flexWrap: "wrap",
@@ -826,7 +826,7 @@ export default function SalesAnalyticsDashboard() {
             fontWeight: 700,
             fontSize: 14, cursor: "pointer", transition: "all 200ms ease",
             boxShadow: activeTab === t.id ? "0 4px 14px rgba(180,83,9,0.28)" : "none",
-            whiteSpace: "nowrap",
+            whiteSpace: "nowrap", minWidth: isMobile ? 140 : 150, textAlign: "center",
           }}>
             {t.label}
           </button>
