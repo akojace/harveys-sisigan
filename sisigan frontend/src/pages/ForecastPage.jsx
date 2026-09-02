@@ -1,6 +1,7 @@
 // src/pages/ForecastPage.jsx
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Button, EmptyState } from '../components/ui'
+import { useIsMobile } from '../hooks/useIsMobile'
 import * as XLSX from 'xlsx'
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -465,6 +466,7 @@ function ChartTooltip({ active, payload, label, prefix = '' }) {
 }
 
 export default function ForecastPage() {
+  const isMobile = useIsMobile()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [rawData, setRawData] = useState([])
@@ -585,8 +587,9 @@ export default function ForecastPage() {
     )
   }
 
+  // CHANGED — less horizontal padding on mobile
   return (
-    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: 28 }}>
+    <div style={{ width: '95%', maxWidth: 1800, margin: '0 auto', padding: isMobile ? '16px 12px' : 28 }}>
       {/* ── Header ── */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
@@ -604,49 +607,56 @@ export default function ForecastPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Period selector */}
-          <div style={{ display: 'flex', gap: 6, position: 'relative', alignItems: 'center' }}>
-            {PERIODS.map(p => (
-              <button
-                key={p.value}
-                onClick={() => handlePeriodClick(p.value)}
-                style={{
-                  padding: '10px 18px', borderRadius: 'var(--radius-full)', border: 'none',
-                  background: period === p.value ? 'var(--gradient-primary)' : 'var(--brown-100)',
-                  color: period === p.value ? '#fff' : 'var(--brown-800)',
-                  fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 200ms ease',
-                  boxShadow: period === p.value ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
+        {/* CHANGED — flattened into one flex row (same fix as Dashboard) so
+            period pills, custom-range pill, export dropdown, and refresh
+            all wrap together as peers instead of the period pills being
+            their own nested box (which also had no flexWrap of its own,
+            so it would have overflowed horizontally rather than wrapped) */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {PERIODS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => handlePeriodClick(p.value)}
+              style={{
+                padding: '10px 18px', borderRadius: 'var(--radius-full)', border: 'none',
+                background: period === p.value ? 'var(--gradient-primary)' : 'var(--brown-100)',
+                color: period === p.value ? '#fff' : 'var(--brown-800)',
+                fontWeight: 700, fontSize: 12.5, cursor: 'pointer', transition: 'all 200ms ease',
+                boxShadow: period === p.value ? '0 4px 14px rgba(180,83,9,0.28)' : 'none',
+                whiteSpace: 'nowrap', minWidth: 92, textAlign: 'center',
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
 
-            {customRangeLabel && (
-              <span
-                onClick={() => setShowRangePicker(true)}
-                style={{
-                  fontSize: 11.5, fontWeight: 700, color: 'var(--brown-600)',
-                  background: 'var(--brown-50)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-full)', padding: '5px 12px',
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                }}
-                title="Click to change range"
-              >
-                {customRangeLabel} ✎
-              </span>
-            )}
+          {(customRangeLabel || showRangePicker) && (
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              {customRangeLabel && (
+                <span
+                  onClick={() => setShowRangePicker(true)}
+                  style={{
+                    fontSize: 11.5, fontWeight: 700, color: 'var(--brown-600)',
+                    background: 'var(--brown-50)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                  title="Click to change range"
+                >
+                  {customRangeLabel} ✎
+                </span>
+              )}
 
-            {showRangePicker && (
-              <CustomRangePicker
-                startDate={customStart} endDate={customEnd}
-                minDate={minDate} maxDate={maxDate}
-                onChange={(s, e) => { setCustomStart(s); setCustomEnd(e) }}
-                onClose={() => setShowRangePicker(false)}
-              />
-            )}
-          </div>
+              {showRangePicker && (
+                <CustomRangePicker
+                  startDate={customStart} endDate={customEnd}
+                  minDate={minDate} maxDate={maxDate}
+                  onChange={(s, e) => { setCustomStart(s); setCustomEnd(e) }}
+                  onClose={() => setShowRangePicker(false)}
+                />
+              )}
+            </div>
+          )}
 
           {/* ⬇ Export dropdown */}
           <ExportDropdown
@@ -690,7 +700,8 @@ export default function ForecastPage() {
       </div>
 
       {/* ── Charts ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
+      {/* CHANGED — stack to 1 column on mobile */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 18, marginBottom: 18 }}>
         <Section title="📈 Forecast Sales Trend">
           {salesTrend.length ? (
             <ResponsiveContainer width="100%" height={280}>
@@ -710,9 +721,13 @@ export default function ForecastPage() {
           {topCategories.length ? (
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
+                {/* CHANGED — only label slices with actual share (same fix
+                    as Dashboard's Sales by Category chart); 0%-value slices
+                    collapse their label anchor onto the same point,
+                    stacking overlapping text */}
                 <Pie data={topCategories} dataKey="value" nameKey="name"
                   cx="50%" cy="50%" outerRadius={100}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''}
                   labelLine={false}>
                   {topCategories.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
@@ -724,7 +739,8 @@ export default function ForecastPage() {
         </Section>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, marginBottom: 18 }}>
+      {/* CHANGED — stack to 1 column on mobile */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 18, marginBottom: 18 }}>
         <Section title="🏆 Best Sellers Forecast (by quantity)">
           {bestSellers.length ? (
             <ResponsiveContainer width="100%" height={260}>
