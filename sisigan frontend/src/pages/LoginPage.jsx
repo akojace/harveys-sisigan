@@ -1,9 +1,10 @@
 // src/pages/LoginPage.jsx
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Button, Input } from '../components/ui'
+import { Button, Input, PasswordInput } from '../components/ui'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 import wall1 from '../assets/LOGO/wall1.jpg'
 import logo from '../assets/LOGO/logo.jpg'
@@ -19,21 +20,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const [isMobile, setIsMobile] = useState(
-    window.innerWidth < 768
-  )
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-    }
-  }, [])
+  // CHANGED — use the shared useIsMobile hook instead of duplicating
+  // resize-listener logic locally
+  const isMobile = useIsMobile()
 
   async function handleLogin() {
     setLoading(true)
@@ -207,9 +196,8 @@ export default function LoginPage() {
               onChange={e => setEmail(e.target.value)}
               placeholder="Enter your email"
             />
-            <Input
+            <PasswordInput
               label="Password"
-              type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="Enter your password"

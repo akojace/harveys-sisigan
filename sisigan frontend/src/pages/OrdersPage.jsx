@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ordersApi, authApi } from '../api/client'
-import { Badge, Button, Modal, EmptyState } from '../components/ui'
+import { Badge, Button, Modal, EmptyState, PasswordInput } from '../components/ui'
 import { printReceipt } from '../components/ui/ThermalReceipt'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -207,10 +207,12 @@ function ReopenView({ order, onClose, onReopened }) {
         </p>
       </div>
       <div style={{ ...narrowStyle, marginBottom: 18, textAlign: 'left' }}>
-        <label style={labelStyle}>Your Password</label>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+        <PasswordInput
+          label="Your Password"
+          value={password} onChange={e => setPassword(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleReopen()}
-          placeholder="Enter your password" style={inputStyle} autoFocus />
+          placeholder="Enter your password" autoFocus
+        />
       </div>
       {error && <p style={{ ...narrowStyle, color: 'var(--red)', fontSize: 13, marginBottom: 14 }}>{error}</p>}
       <div style={{ display: 'flex', gap: 12 }}>

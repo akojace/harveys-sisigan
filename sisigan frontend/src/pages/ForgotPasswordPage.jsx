@@ -1,7 +1,8 @@
 // src/pages/ForgotPasswordPage.jsx
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Button, Input } from '../components/ui'
+import { Button, Input, PasswordInput } from '../components/ui'
+import { useIsMobile } from '../hooks/useIsMobile'
 import logo from '../assets/LOGO/logo.jpg'
 import { authApi } from '../api/client'
 
@@ -16,21 +17,9 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const [isMobile, setIsMobile] = useState(
-    window.innerWidth < 768
-  )
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-    }
-  }, [])
+  // CHANGED — use the shared useIsMobile hook instead of duplicating
+  // resize-listener logic locally
+  const isMobile = useIsMobile()
 
   // STEP 1: Request password reset
   async function handleRequestReset() {
@@ -311,17 +300,15 @@ export default function ForgotPasswordPage() {
             {/* STEP 3: New Password */}
             {step === 3 && (
               <>
-                <Input
+                <PasswordInput
                   label="New Password"
-                  type="password"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="Enter new password (min 8 characters)"
                 />
 
-                <Input
+                <PasswordInput
                   label="Confirm Password"
-                  type="password"
                   value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)}
                   placeholder="Confirm your password"

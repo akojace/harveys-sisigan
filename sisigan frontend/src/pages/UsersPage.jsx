@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { usersApi, dashboardApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { Button, Input, Modal, EmptyState } from '../components/ui'
+import { Button, Input, Modal, EmptyState, PasswordInput } from '../components/ui'
 
 const ROLE_COLORS = {
   OWNER: { bg: '#FEE2E2', color: '#991B1B' },
@@ -109,11 +109,10 @@ function UserModal({ editUser, branches, onClose, onSaved, requestingRole }) {
 
         {!isEdit && (
           <>
-            <Input label="Password" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Minimum 6 characters" />
+            <PasswordInput label="Password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Minimum 6 characters" />
             <div>
-              <Input
+              <PasswordInput
                 label="Confirm Password"
-                type="password"
                 value={form.confirmPassword}
                 onChange={e => set('confirmPassword', e.target.value)}
                 placeholder="Re-enter password"
@@ -196,7 +195,7 @@ function ResetPasswordModal({ user, onClose }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Input label="New Password" type="password" value={pwd} onChange={e => setPwd(e.target.value)} placeholder="Minimum 6 characters" />
+          <PasswordInput label="New Password" value={pwd} onChange={e => setPwd(e.target.value)} placeholder="Minimum 6 characters" />
           {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
           <div style={{ display: 'flex', gap: 12 }}>
             <Button variant="outline" fullWidth onClick={onClose}>Cancel</Button>

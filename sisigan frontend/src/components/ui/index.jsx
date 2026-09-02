@@ -1,5 +1,6 @@
 // src/components/ui/index.jsx
 // Shared UI primitives used across pages
+import { useState } from 'react'
 
 // ─── STATUS BADGE ─────────────────────────────────────────
 const STATUS_STYLES = {
@@ -98,6 +99,62 @@ export function Input({ label, error, style = {}, ...props }) {
           e.target.style.boxShadow = 'none'
         }}
       />
+      {error && <span style={{ fontSize: 12, color: 'var(--red)' }}>{error}</span>}
+    </div>
+  )
+}
+
+// ─── PASSWORD INPUT ───────────────────────────────────────
+// ADDED — same visual style as Input, but with a show/hide toggle since
+// password fields shouldn't force the plain Input component to grow an
+// icon-adornment feature that every other text/number/email field using
+// Input would also need to account for.
+export function PasswordInput({ label, error, style = {}, ...props }) {
+  const [show, setShow] = useState(false)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {label && (
+        <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {label}
+        </label>
+      )}
+      <div style={{ position: 'relative' }}>
+        <input
+          {...props}
+          type={show ? 'text' : 'password'}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '12px 44px 12px 14px', border: `1.5px solid ${error ? 'var(--red)' : 'var(--border)'}`,
+            borderRadius: 'var(--radius-md)', fontSize: 14.5,
+            background: '#fff', color: 'var(--text-dark)', outline: 'none',
+            transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
+            ...style,
+          }}
+          onFocus={e => {
+            e.target.style.borderColor = 'var(--brown-600)'
+            e.target.style.boxShadow = '0 0 0 3px rgba(180,83,9,0.12)'
+          }}
+          onBlur={e => {
+            e.target.style.borderColor = error ? 'var(--red)' : 'var(--border)'
+            e.target.style.boxShadow = 'none'
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setShow(s => !s)}
+          tabIndex={-1}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          style={{
+            position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 17, color: 'var(--text-muted)', padding: 8,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            lineHeight: 1,
+          }}
+        >
+          {show ? '🙈' : '👁️'}
+        </button>
+      </div>
       {error && <span style={{ fontSize: 12, color: 'var(--red)' }}>{error}</span>}
     </div>
   )
