@@ -463,9 +463,9 @@ export default function InventoryPage() {
           }
         >
           {inventory.length === 0 ? (
-            <EmptyState icon="??" title="No ingredients yet" subtitle="Add ingredients to start tracking stock" />
+            <EmptyState icon="📦" title="No ingredients yet" subtitle="Add ingredients to start tracking stock" />
           ) : filteredInventory.length === 0 ? (
-            <EmptyState icon="??" title="No matches" subtitle={`No ingredients match "${searchTerm}"`} />
+            <EmptyState icon="🔍" title="No matches" subtitle={`No ingredients match "${searchTerm}"`} />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
@@ -487,7 +487,7 @@ export default function InventoryPage() {
                         <td style={{ padding: '9px 12px', color: 'var(--text-mid)' }}>{item.ingredient?.category}</td>
                         <td style={{ padding: '9px 12px' }}>{Number(item.quantity).toFixed(3)} {item.ingredient?.unit}</td>
                         <td style={{ padding: '9px 12px' }}>{Number(item.minThreshold).toFixed(3)} {item.ingredient?.unit}</td>
-                        <td style={{ padding: '9px 12px' }}>{item.price ? `?${Number(item.price).toFixed(2)}` : '-'}</td>
+                        <td style={{ padding: '9px 12px' }}>{item.price ? `₱${Number(item.price).toFixed(2)}` : '-'}</td>
                         <td style={{ padding: '9px 12px', color: 'var(--text-mid)' }}>{item.branch?.name}</td>
                         <td style={{ padding: '9px 12px' }}>
                           <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 'var(--radius-full)', background: low ? 'var(--red-light)' : 'var(--green-light)', color: low ? 'var(--red-dark)' : 'var(--green-dark)' }}>
