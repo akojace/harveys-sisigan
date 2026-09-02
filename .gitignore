@@ -38,3 +38,7 @@ sisigan_db.sql
 sisigan_db.sql
 sisigan backend/prisma/mediumBlob photos.sql
 sisigan backend/prisma/seed.sql
+
+## One-off data-fix scripts containing raw DB data (image BLOBs etc.) —
+## not source code, shouldn't be committed
+fixed-photos.sql
