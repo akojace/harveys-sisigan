@@ -5,6 +5,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { dashboardApi } from "../api/client";
 
 // CHANGED — was hardcoded to the local Cloudflare Tunnel address
 // (https://sisigan-analytics.ardpi.me/api), which only worked while
@@ -13,11 +14,14 @@ import { useIsMobile } from "../hooks/useIsMobile";
 // deployed Render service.
 const API = `${import.meta.env.VITE_ANALYTICS_URL}/api`;
 
-// TODO: replace with your real backend base URL / axios instance from
-// src/api/client.js. This is the Express + Prisma backend (port likely
-// 4000/5000, not the Python service above), and it needs the auth token
-// your AuthContext already attaches to other requests.
-const NODE_API = "http://localhost:5000/api";
+// FIXED — this used to be a raw fetch() to a hardcoded
+// "http://localhost:5000/api", which never worked outside a local dev
+// setup (no base URL config, no auth token) and the backend endpoint it
+// called wasn't even wired up yet (the service function existed but had
+// no controller/route). Both are now fixed: dashboardApi.ingredientRecommendations
+// (src/api/client.js) uses the real deployed backend URL and attaches
+// the auth token like every other API call in the app, and the backend
+// now exposes POST /api/dashboard/ingredient-recommendations.
 
 const C = {
   // Main brand colors — aligned to the app's orange/brown palette
@@ -621,19 +625,10 @@ function TrendingItemsSection() {
 
     // Step 2: ingredient recommendations, from the Node + Prisma backend.
     // Separate try/catch so its errors never get lost behind step 1's state.
-    // TODO: swap for your authenticated client (adds JWT header, base URL
-    // from src/api/client.js) once dashboard.controller.js / routes.js
-    // expose this endpoint — see integration notes below the component.
     setRecLoading(true);
     try {
-      const recRes = await fetch(`${NODE_API}/dashboard/ingredient-recommendations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: forecastedItems }),
-      });
-      if (!recRes.ok) throw new Error(`Backend returned ${recRes.status} ${recRes.statusText}`);
-      const rec = await recRes.json();
-      setRecData(rec);
+      const rec = await dashboardApi.ingredientRecommendations(forecastedItems);
+      setRecData(rec.data);
     } catch (e) {
       setRecError(e.message);
     } finally {

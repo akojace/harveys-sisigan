@@ -72,6 +72,12 @@ export const dashboardApi = {
     const q = new URLSearchParams(params).toString()
     return request(`/dashboard/profit${q ? '?' + q : ''}`)
   },
+  // ADDED — ingredient recommendations from forecasted demand
+  ingredientRecommendations: (items, branchId) =>
+    request('/dashboard/ingredient-recommendations', {
+      method: 'POST',
+      body: JSON.stringify({ items, ...(branchId && { branchId }) }),
+    }),
 }
 
 // ── Users ─────────────────────────────────────────────────

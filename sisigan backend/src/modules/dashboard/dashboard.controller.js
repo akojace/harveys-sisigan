@@ -41,4 +41,19 @@ async function getProfitReport(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getDashboard, getBranches, getAuthLogs, getProfitReport };
+// ADDED — expose the already-implemented but previously unwired
+// getIngredientRecommendations service function. Takes forecasted items
+// from the analytics service's trending-items-forecast endpoint and
+// checks projected demand against current stock.
+async function getIngredientRecommendations(req, res, next) {
+  try {
+    const { items, branchId } = req.body;
+    const data = await dashboardService.getIngredientRecommendations(
+      { items, branchId },
+      req.user
+    );
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+module.exports = { getDashboard, getBranches, getAuthLogs, getProfitReport, getIngredientRecommendations };
