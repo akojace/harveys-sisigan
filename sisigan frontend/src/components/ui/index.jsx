@@ -54,6 +54,12 @@ export function Button({ children, variant = 'primary', size = 'md', disabled, o
         width: fullWidth ? '100%' : undefined,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
         transform: 'translateY(0)',
+        // ADDED — this shared Button had no whiteSpace: nowrap, so any
+        // button with a longer label (e.g. "+ Add Ingredient") could wrap
+        // onto 2 lines in a narrow flex row while shorter neighbors
+        // ("Refresh") stayed on 1, making them look like different shapes.
+        // Applies everywhere Button is used across the app.
+        whiteSpace: 'nowrap',
         ...style,
       }}
       onMouseEnter={e => {
