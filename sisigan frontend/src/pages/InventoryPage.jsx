@@ -326,15 +326,20 @@ export default function InventoryPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        {/* CHANGED — on mobile, branch select gets its own full-width row,
+            with Add Ingredient / Refresh stacked below it as a separate
+            row, instead of all three competing for space on one line */}
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 10, alignItems: isMobile ? 'stretch' : 'center', width: isMobile ? '100%' : undefined, flexWrap: 'wrap' }}>
           {isOwner && (
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} style={{ padding: '9px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-md)', background: '#fff', cursor: 'pointer' }}>
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} style={{ padding: '9px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-md)', background: '#fff', cursor: 'pointer', width: isMobile ? '100%' : undefined }}>
               <option value="">All Branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           )}
-          <Button variant="primary" size="sm" onClick={() => setShowAdd(true)}>+ Add Ingredient</Button>
-          <Button variant="outline" size="sm" onClick={load}>Refresh</Button>
+          <div style={{ display: 'flex', gap: 10, width: isMobile ? '100%' : undefined }}>
+            <Button variant="primary" size="sm" onClick={() => setShowAdd(true)} style={isMobile ? { flex: 1 } : undefined}>+ Add Ingredient</Button>
+            <Button variant="outline" size="sm" onClick={load} style={isMobile ? { flex: 1 } : undefined}>Refresh</Button>
+          </div>
         </div>
       </div>
 
