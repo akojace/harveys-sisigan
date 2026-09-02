@@ -4,6 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from "recharts";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 // CHANGED — was hardcoded to the local Cloudflare Tunnel address
 // (https://sisigan-analytics.ardpi.me/api), which only worked while
@@ -798,6 +799,7 @@ function TrendingItemsSection() {
 export default function SalesAnalyticsDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const { loading: pageLoading }  = useFetch("/overview");
+  const isMobile = useIsMobile();
 
   const tabs = [
     { id: "overview", label: "📊 Overview"   },
@@ -811,10 +813,14 @@ export default function SalesAnalyticsDashboard() {
   return (
     <div style={{ minHeight: "100vh", background: C.pageBg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
 
-      {/* Tab bar — pill-style, matches the redesigned Navbar */}
+      {/* Tab bar — CHANGED: added flexWrap + whiteSpace: nowrap on the
+          pills (same fix as Dashboard/Menu/Forecast page tabs) so
+          "🍽️ Menu Items" doesn't wrap its text onto 2 lines and the row
+          wraps as whole pills instead of overflowing on mobile; also
+          less horizontal padding on mobile */}
       <div style={{
         background: "#fff", borderBottom: `1px solid ${C.grid}`,
-        padding: "16px 32px", display: "flex", gap: 8,
+        padding: isMobile ? "14px 14px" : "16px 32px", display: "flex", gap: 8, flexWrap: "wrap",
       }}>
         {tabs.map((t) => (
           <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
@@ -825,14 +831,15 @@ export default function SalesAnalyticsDashboard() {
             fontWeight: 700,
             fontSize: 14, cursor: "pointer", transition: "all 200ms ease",
             boxShadow: activeTab === t.id ? "0 4px 14px rgba(180,83,9,0.28)" : "none",
+            whiteSpace: "nowrap",
           }}>
             {t.label}
           </button>
         ))}
       </div>
 
-      {/* Page content */}
-      <div style={{ width: "95%", maxWidth: 1800, margin: "0 auto", padding: "28px 0" }}>
+      {/* Page content — CHANGED: less horizontal padding on mobile */}
+      <div style={{ width: "95%", maxWidth: 1800, margin: "0 auto", padding: isMobile ? "16px 4px" : "28px 0" }}>
         {activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
             <OverviewSection />
