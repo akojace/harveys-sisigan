@@ -12,7 +12,19 @@ import { dashboardApi } from "../api/client";
 // the analytics service ran on a local PC. Now reads from an env var,
 // same pattern as the backend URL in api/client.js, pointing at the
 // deployed Render service.
-const API = `${import.meta.env.VITE_ANALYTICS_URL}/api`;
+//
+// ADDED — if the env var is missing, this used to silently become
+// "undefined/api" and every request would resolve to a path on the
+// frontend's own domain (200 OK from the SPA's own index.html
+// fallback, not real data — very confusing to debug). Now it throws a
+// clear error instead of silently producing a broken URL.
+if (!import.meta.env.VITE_ANALYTICS_URL) {
+  console.error(
+    'VITE_ANALYTICS_URL is not set — the Analytics page cannot reach the analytics service. ' +
+    'Set it in the frontend\'s Render environment variables and redeploy.'
+  );
+}
+const API = `${import.meta.env.VITE_ANALYTICS_URL || ''}/api`;
 
 // FIXED — this used to be a raw fetch() to a hardcoded
 // "http://localhost:5000/api", which never worked outside a local dev
