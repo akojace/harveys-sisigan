@@ -45,4 +45,20 @@ router.patch(
   inventoryController.patchInventory
 );
 
+// ADDED — PATCH /api/inventory/:id/details — edit ingredient details
+// (category/unit/price/threshold/consumption) without touching quantity
+router.patch(
+  '/:id/details',
+  [
+    body('category').optional().isIn(['SAUCE', 'SPICES', 'MAIN_INGREDIENT', 'RICE', 'UTILITIES', 'GAS']).withMessage('Invalid ingredient category.'),
+    body('unit').optional().isIn(['ML', 'GRAM', 'LITER', 'PCS', 'GALLON', 'TANK', 'BAG', 'PACK', 'TUB']).withMessage('Invalid unit.'),
+    body('price').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('price must be non-negative.'),
+    body('minThreshold').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('minThreshold must be non-negative.'),
+    body('consumptionRateDays').optional({ nullable: true }).isInt({ min: 1 }).withMessage('consumptionRateDays must be >= 1.'),
+    body('consumptionLabel').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+    body('dailyDeductionAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('dailyDeductionAmount must be non-negative.'),
+  ],
+  inventoryController.patchInventoryDetails
+);
+
 module.exports = router;

@@ -106,6 +106,88 @@ async function updateInventoryItem(itemId, { quantity, note }, requestingUser) {
   };
 }
 
+// ADDED — edits an ingredient's category/unit/price/threshold/consumption
+// settings WITHOUT touching quantity. Deliberately separate from
+// updateInventoryItem above (which only ever touches quantity) so an
+// edit here can never accidentally overwrite someone's actual stock
+// count. Updates BOTH the shared Ingredient record (defaultPrice etc. -
+// what the Profit Report reads) and this specific branch's InventoryItem
+// fields, same as createInventoryItem does when it upserts by name -
+// this just does it explicitly, by ID, from an Edit button, instead of
+// requiring an exact-name retype that risks creating a duplicate on a typo.
+async function updateIngredientDetails(itemId, payload, requestingUser) {
+  const { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount } = payload;
+
+  const existing = await prisma.inventoryItem.findUnique({
+    where: { id: Number(itemId) },
+    include: { ingredient: true },
+  });
+
+  if (!existing) {
+    throw { statusCode: 404, message: 'Inventory item not found.' };
+  }
+
+  if (requestingUser.role !== 'OWNER' && existing.branchId !== requestingUser.branchId) {
+    throw { statusCode: 403, message: 'Access denied for this branch inventory.' };
+  }
+
+  const p = price !== undefined && price !== null && price !== '' ? Number(price) : null;
+  const min = minThreshold !== undefined && minThreshold !== null && minThreshold !== '' ? Number(minThreshold) : Number(existing.minThreshold);
+  const rateDays = consumptionRateDays !== undefined && consumptionRateDays !== null && consumptionRateDays !== '' ? Number(consumptionRateDays) : null;
+  const daily = dailyDeductionAmount !== undefined && dailyDeductionAmount !== null && dailyDeductionAmount !== '' ? Number(dailyDeductionAmount) : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // Update the shared Ingredient record (what the Profit Report reads)
+    await tx.ingredient.update({
+      where: { id: existing.ingredientId },
+      data: {
+        ...(category && { category }),
+        ...(unit && { unit }),
+        ...(p !== null && { defaultPrice: p }),
+        defaultMinThreshold: min,
+        ...(rateDays !== null && { defaultConsumptionRateDays: rateDays }),
+        ...(consumptionLabel !== undefined && { defaultConsumptionLabel: consumptionLabel || null }),
+        ...(daily !== null && { defaultDailyDeduction: daily }),
+      },
+    });
+
+    // Update this branch's InventoryItem — quantity intentionally excluded
+    const row = await tx.inventoryItem.update({
+      where: { id: Number(itemId) },
+      data: {
+        price: p,
+        minThreshold: min,
+        ...(rateDays !== null && { consumptionRateDays: rateDays }),
+        ...(consumptionLabel !== undefined && { consumptionLabel: consumptionLabel || null }),
+        ...(daily !== null && { dailyDeductionAmount: daily }),
+      },
+      include: {
+        branch: { select: { id: true, name: true, city: true } },
+        ingredient: { select: { id: true, name: true, category: true, unit: true, defaultPrice: true } },
+      },
+    });
+
+    await tx.inventoryAuditLog.create({
+      data: {
+        inventoryItemId: row.id,
+        actionType: 'MANUAL_EDIT',
+        quantityBefore: Number(row.quantity),
+        quantityAfter: Number(row.quantity),
+        quantityChanged: 0,
+        note: 'Edited ingredient details (price/category/unit/threshold)',
+        actorUserId: requestingUser.id,
+      },
+    });
+
+    return row;
+  });
+
+  return {
+    ...updated,
+    lowStock: Number(updated.quantity) <= Number(updated.minThreshold),
+  };
+}
+
 async function createInventoryItem(payload, requestingUser) {
   const {
     name,
@@ -445,6 +527,7 @@ module.exports = {
   getInventory,
   createInventoryItem,
   updateInventoryItem,
+  updateIngredientDetails,
   deductInventoryForOrder,
   runDailyDeduction,
   seedBranchInventory,

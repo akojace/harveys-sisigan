@@ -108,6 +108,9 @@ export const inventoryApi = {
   },
   create: (data) => request('/inventory', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/inventory/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // ADDED — edit ingredient details (category/unit/price/threshold/
+  // consumption) without touching quantity
+  updateDetails: (id, data) => request(`/inventory/${id}/details`, { method: 'PATCH', body: JSON.stringify(data) }),
 }
 
 export const reportsApi = {

@@ -55,4 +55,26 @@ async function createInventory(req, res, next) {
   }
 }
 
-module.exports = { getInventory, patchInventory, createInventory };
+// ADDED — edits ingredient details (category/unit/price/threshold/
+// consumption settings) without touching quantity, via inventoryService.updateIngredientDetails
+async function patchInventoryDetails(req, res, next) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount } = req.body;
+    const data = await inventoryService.updateIngredientDetails(
+      req.params.id,
+      { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount },
+      req.user
+    );
+
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { getInventory, patchInventory, patchInventoryDetails, createInventory };

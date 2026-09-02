@@ -144,6 +144,98 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
   )
 }
 
+// ADDED — edits an existing inventory row's category/unit/price/threshold/
+// consumption settings, WITHOUT touching quantity (that's handled by the
+// separate "Add Quantity" section below). Pre-filled from the row's
+// current values, so no risk of retyping the ingredient name wrong and
+// accidentally creating a duplicate (which the old "just re-add it with
+// the same name" workaround risked).
+function EditIngredientModal({ item, onClose, onSaved }) {
+  const isMobile = useIsMobile()
+  const [form, setForm] = useState({
+    category: item.ingredient?.category || 'SAUCE',
+    unit: item.ingredient?.unit || 'PCS',
+    minThreshold: item.minThreshold != null ? String(item.minThreshold) : '',
+    price: item.price != null ? String(item.price) : '',
+    consumptionRateDays: item.consumptionRateDays != null ? String(item.consumptionRateDays) : '',
+    consumptionLabel: item.consumptionLabel || '',
+    dailyDeductionAmount: item.dailyDeductionAmount != null ? String(item.dailyDeductionAmount) : '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
+
+  async function save() {
+    setSaving(true)
+    setError('')
+    try {
+      const payload = {
+        category: form.category,
+        unit: form.unit,
+      }
+      if (form.minThreshold !== '') payload.minThreshold = Number(form.minThreshold)
+      if (form.price !== '') payload.price = Number(form.price)
+      if (form.consumptionRateDays !== '') payload.consumptionRateDays = Number(form.consumptionRateDays)
+      payload.consumptionLabel = form.consumptionLabel.trim()
+      if (form.dailyDeductionAmount !== '') payload.dailyDeductionAmount = Number(form.dailyDeductionAmount)
+
+      await inventoryApi.updateDetails(item.id, payload)
+      onSaved()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Edit ${item.ingredient?.name}`} onClose={onClose} width={480}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', background: 'var(--brown-50)', padding: '10px 14px', borderRadius: 'var(--radius-md)' }}>
+          Editing for <strong>{item.branch?.name}</strong>. Quantity isn't changed here — use "Add Quantity" below for stock adjustments.
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={lbl}>Category</label>
+            <select value={form.category} onChange={(e) => set('category', e.target.value)} style={selectStyle}>
+              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Unit</label>
+            <select value={form.unit} onChange={(e) => set('unit', e.target.value)} style={selectStyle}>
+              {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <Input label="Price" type="number" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="e.g. 85.00" />
+          <Input label="Min Threshold" type="number" value={form.minThreshold} onChange={(e) => set('minThreshold', e.target.value)} />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <Input label="Consumption Days" type="number" value={form.consumptionRateDays} onChange={(e) => set('consumptionRateDays', e.target.value)} />
+          <Input label="Daily Deduction" type="number" value={form.dailyDeductionAmount} onChange={(e) => set('dailyDeductionAmount', e.target.value)} />
+        </div>
+
+        <Input label="Consumption Label" value={form.consumptionLabel} onChange={(e) => set('consumptionLabel', e.target.value)} placeholder="e.g. Daily" />
+
+        {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Button variant="outline" fullWidth onClick={onClose}>Cancel</Button>
+          <Button variant="primary" fullWidth disabled={saving} onClick={save}>
+            {saving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // Adds stock to one existing inventory item. Kept separate from the read-only
 // ingredients table below — this is the only place on the page that writes
 // quantity. It always ADDS to the current amount; it never lets you set an
@@ -249,6 +341,8 @@ export default function InventoryPage() {
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  // ADDED — currently-open edit modal's item, or null
+  const [editItem, setEditItem] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
@@ -377,7 +471,7 @@ export default function InventoryPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
                 <thead>
                   <tr style={{ background: 'var(--brown-50)' }}>
-                    {['Ingredient', 'Category', 'Qty', 'Threshold', 'Price', 'Branch', 'Status'].map((h) => (
+                    {['Ingredient', 'Category', 'Qty', 'Threshold', 'Price', 'Branch', 'Status', 'Actions'].map((h) => (
                       <th key={h} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                         {h}
                       </th>
@@ -399,6 +493,15 @@ export default function InventoryPage() {
                           <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 'var(--radius-full)', background: low ? 'var(--red-light)' : 'var(--green-light)', color: low ? 'var(--red-dark)' : 'var(--green-dark)' }}>
                             {low ? 'LOW' : 'OK'}
                           </span>
+                        </td>
+                        {/* ADDED — Edit button, opens EditIngredientModal pre-filled with this row */}
+                        <td style={{ padding: '9px 12px' }}>
+                          <button
+                            onClick={() => setEditItem(item)}
+                            style={{ padding: '6px 12px', border: '1.5px solid var(--brown-300)', borderRadius: 'var(--radius-sm)', background: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', color: 'var(--brown-700)', whiteSpace: 'nowrap' }}
+                          >
+                            ✏️ Edit
+                          </button>
                         </td>
                       </tr>
                     )
@@ -464,6 +567,15 @@ export default function InventoryPage() {
           branchId={branchId}
           onClose={() => setShowAdd(false)}
           onSaved={onSavedIngredient}
+        />
+      )}
+
+      {/* ADDED — edit modal, opened via the ✏️ button on each ingredients-table row */}
+      {editItem && (
+        <EditIngredientModal
+          item={editItem}
+          onClose={() => setEditItem(null)}
+          onSaved={async () => { setEditItem(null); await onSavedIngredient() }}
         />
       )}
     </div>
