@@ -5,7 +5,12 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const API = "https://sisigan-analytics.ardpi.me/api";
+// CHANGED — was hardcoded to the local Cloudflare Tunnel address
+// (https://sisigan-analytics.ardpi.me/api), which only worked while
+// the analytics service ran on a local PC. Now reads from an env var,
+// same pattern as the backend URL in api/client.js, pointing at the
+// deployed Render service.
+const API = `${import.meta.env.VITE_ANALYTICS_URL}/api`;
 
 // TODO: replace with your real backend base URL / axios instance from
 // src/api/client.js. This is the Express + Prisma backend (port likely
