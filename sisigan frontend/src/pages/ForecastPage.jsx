@@ -319,6 +319,9 @@ function CustomRangePicker({ startDate, endDate, minDate, maxDate, onChange, onC
   const [localStart, setLocalStart] = useState(startDate || '')
   const [localEnd, setLocalEnd] = useState(endDate || '')
   const ref = useRef(null)
+  // ADDED — same mobile fix as Dashboard's CustomRangePicker: render
+  // inline (pushes content down) instead of floating over content below
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     function handleClick(e) {
@@ -342,7 +345,12 @@ function CustomRangePicker({ startDate, endDate, minDate, maxDate, onChange, onC
   const isValid = localStart && localEnd && localStart <= localEnd
 
   return (
-    <div ref={ref} style={{
+    <div ref={ref} style={isMobile ? {
+      position: 'static', width: '100%', marginTop: 10,
+      background: 'var(--cream)', border: '1.5px solid var(--border)',
+      borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)',
+      padding: 16, boxSizing: 'border-box',
+    } : {
       position: 'absolute', top: '110%', right: 0, zIndex: 100,
       background: 'var(--cream)', border: '1.5px solid var(--border)',
       borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)',
@@ -630,8 +638,10 @@ export default function ForecastPage() {
             </button>
           ))}
 
+          {/* CHANGED — on mobile, full-width block instead of inline-flex,
+              so the picker's width: 100% has something to size against */}
           {(customRangeLabel || showRangePicker) && (
-            <div style={{ position: 'relative', display: 'inline-flex' }}>
+            <div style={{ position: 'relative', display: isMobile ? 'block' : 'inline-flex', width: isMobile ? '100%' : undefined }}>
               {customRangeLabel && (
                 <span
                   onClick={() => setShowRangePicker(true)}
