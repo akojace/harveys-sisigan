@@ -498,6 +498,12 @@ function CustomRangePicker({ startDate, endDate, onChange, onClose, onReset }) {
   const [localStart, setLocalStart] = useState(startDate || '')
   const [localEnd, setLocalEnd] = useState(endDate || '')
   const ref = useRef(null)
+  // ADDED — on mobile, render inline (pushing content down) instead of
+  // absolutely-positioned floating over the stat cards below. The
+  // floating version was anchored to the "Custom" button's own position
+  // with a fixed minWidth of 290px, which doesn't fit cleanly anywhere
+  // on a narrow screen and ends up covering nearby content instead.
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     function handleClick(e) {
@@ -528,7 +534,12 @@ function CustomRangePicker({ startDate, endDate, onChange, onClose, onReset }) {
   const isValid = localStart && localEnd && localStart <= localEnd
 
   return (
-    <div ref={ref} style={{
+    <div ref={ref} style={isMobile ? {
+      position: 'static', width: '100%', marginTop: 10,
+      background: 'var(--cream)', border: '1.5px solid var(--border)',
+      borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)',
+      padding: 16, boxSizing: 'border-box',
+    } : {
       position: 'absolute', top: '110%', right: 0, zIndex: 100,
       background: 'var(--cream)', border: '1.5px solid var(--border)',
       borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)',
@@ -1178,9 +1189,12 @@ export default function DashboardPage() {
           ))}
 
           {/* Small relatively-positioned wrapper just for the dropdown anchor —
-              no flexWrap of its own, so it's a normal single flex item here */}
+              no flexWrap of its own, so it's a normal single flex item here.
+              CHANGED — on mobile, becomes a full-width block instead of
+              inline-flex, so the picker's width: 100% below actually has
+              something meaningful to size against. */}
           {(customRangeLabel || showRangePicker) && (
-            <div style={{ position: 'relative', display: 'inline-flex' }}>
+            <div style={{ position: 'relative', display: isMobile ? 'block' : 'inline-flex', width: isMobile ? '100%' : undefined }}>
               {customRangeLabel && (
                 <span
                   onClick={() => setShowRangePicker(true)}
