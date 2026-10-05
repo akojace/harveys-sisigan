@@ -59,7 +59,12 @@ async function getDashboard({ period = 'today', from, to, branchId }, requesting
       where: orderWhere,
       include: {
         payments: true,
-        items: { include: { menuItem: { include: { category: true } } } },
+        // CHANGED - was `menuItem: { include: { category: true } }`, which loads
+        // EVERY column of MenuItem including `photo` (a MediumBlob) once per
+        // order line. Over a wide date range that is hundreds of ~300KB
+        // buffers and crashes Node with 'heap out of memory'. Only the
+        // fields this report actually reads are selected now.
+        items: { include: { menuItem: { select: { id: true, name: true, category: { select: { id: true, name: true } } } } } },
         branch: { select: { id: true, name: true } },
       },
     }),
@@ -403,8 +408,14 @@ async function getProfitReport({ period = 'today', from, to, branchId }, request
       },
     },
     include: {
+      // CHANGED - select instead of include so the photo blob is not
+      // loaded for every order line (same out-of-memory cause as getDashboard).
       menuItem: {
-        include: { recipes: { include: { ingredient: true } } },
+        select: {
+          id: true,
+          name: true,
+          recipes: { select: { quantity: true, ingredient: { select: { defaultPrice: true } } } },
+        },
       },
     },
   });
