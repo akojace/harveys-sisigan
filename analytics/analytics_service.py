@@ -805,3 +805,18 @@ def get_trending_items_forecast(
 @app.get("/api/items")
 def list_items():
     return ITEM_COLS
+
+
+# TEMPORARY: report this server's outbound IP.
+# Added only to find the exact IP Render connects to Hostinger MySQL from,
+# so it can be whitelisted in Remote MySQL. Does not touch the database.
+# REMOVE after the IP has been whitelisted.
+@app.get("/debug/outbound-ip")
+def debug_outbound_ip():
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen("https://api.ipify.org?format=json", timeout=8) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
