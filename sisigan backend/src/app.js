@@ -43,6 +43,24 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ── TEMPORARY: report this server's outbound IP ───────
+// Added only to find the exact IP Render connects to Hostinger MySQL from,
+// so it can be whitelisted in Remote MySQL. Does not touch the database.
+// REMOVE after the IP has been whitelisted.
+app.get('/debug/outbound-ip', (req, res) => {
+  require('https')
+    .get('https://api.ipify.org?format=json', { timeout: 8000 }, (r) => {
+      let body = '';
+      r.on('data', (c) => (body += c));
+      r.on('end', () => {
+        try { res.json({ outboundIp: JSON.parse(body).ip }); }
+        catch (e) { res.status(502).json({ error: 'bad response', body }); }
+      });
+    })
+    .on('error', (e) => res.status(502).json({ error: e.message }))
+    .on('timeout', function () { this.destroy(new Error('timeout')); });
+});
+
 // ── API Routes ────────────────────────────────────────
 app.use('/api/auth',      authRoutes);
 app.use('/api/menu',      menuRoutes);
