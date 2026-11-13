@@ -55,8 +55,6 @@ async function createInventory(req, res, next) {
   }
 }
 
-// ADDED — edits ingredient details (category/unit/price/threshold/
-// consumption settings) without touching quantity, via inventoryService.updateIngredientDetails
 async function patchInventoryDetails(req, res, next) {
   try {
     const errors = validationResult(req);
@@ -64,10 +62,10 @@ async function patchInventoryDetails(req, res, next) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount } = req.body;
+    const { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount, yieldPercentage } = req.body;
     const data = await inventoryService.updateIngredientDetails(
       req.params.id,
-      { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount },
+      { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount, yieldPercentage },
       req.user
     );
 
@@ -77,4 +75,71 @@ async function patchInventoryDetails(req, res, next) {
   }
 }
 
-module.exports = { getInventory, patchInventory, patchInventoryDetails, createInventory };
+async function restockInventory(req, res, next) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const data = await inventoryService.restockInventoryItem(req.body, req.user);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function adjustInventory(req, res, next) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const { itemId, newQuantity, actionType, note } = req.body;
+    const data = await inventoryService.adjustInventoryItem(
+      itemId,
+      { newQuantity, actionType, note },
+      req.user
+    );
+
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function transferStock(req, res, next) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const data = await inventoryService.transferInventory(req.body, req.user);
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getTransfers(req, res, next) {
+  try {
+    const { branchId, status, limit } = req.query;
+    const data = await inventoryService.getTransfers({ branchId, status, limit }, req.user);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  getInventory,
+  patchInventory,
+  patchInventoryDetails,
+  createInventory,
+  restockInventory,
+  adjustInventory,
+  transferStock,
+  getTransfers,
+};

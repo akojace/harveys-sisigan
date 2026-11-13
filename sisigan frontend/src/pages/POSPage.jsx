@@ -1,7 +1,7 @@
 // src/pages/POSPage.jsx
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { menuApi, ordersApi } from '../api/client'
+import { menuApi, ordersApi, branchesApi } from '../api/client'
 import { Button, EmptyState } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 
@@ -536,7 +536,26 @@ export default function POSPage() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false) // tablet/mobile drawer visibility
   const toastTimer = useRef(null)
 
-  const branchId = user?.branchId
+  const isOwner = user?.role === 'OWNER'
+  const [branches, setBranches] = useState([])
+  const [selectedBranchId, setSelectedBranchId] = useState(user?.branchId || 1)
+
+  // Fetch branches for Owner branch-switching
+  useEffect(() => {
+    if (isOwner) {
+      branchesApi.list().then(res => {
+        const list = (res.data || []).filter(b => b.isActive)
+        setBranches(list)
+        if (list.length && (!selectedBranchId || !list.find(b => b.id === Number(selectedBranchId)))) {
+          setSelectedBranchId(list[0].id)
+        }
+      }).catch(() => {})
+    } else if (user?.branchId) {
+      setSelectedBranchId(user.branchId)
+    }
+  }, [isOwner, user?.branchId])
+
+  const branchId = selectedBranchId || user?.branchId
 
   // ADDED — shows a floating toast for ~1.6s. Purely presentational.
   function showToast(message) {
@@ -546,19 +565,27 @@ export default function POSPage() {
   }
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
 
-  // UNCHANGED — loadMenu
+  // Branch-scoped menu loading with live stock evaluation
   const loadMenu = useCallback(() => {
-    menuApi.categories({ includePhoto: true, enforceStock: true }).then(d => {
+    const bId = selectedBranchId || user?.branchId
+    if (!bId) return
+    menuApi.categories({ branchId: bId, includePhoto: true, enforceStock: false }).then(d => {
       setMenu(d.data || [])
       if (d.data?.length) setActiveCategory(prev => prev ?? d.data[0].id)
     })
-  }, [])
+  }, [selectedBranchId, user?.branchId])
 
-  useEffect(() => { loadMenu() }, [loadMenu])
-
-  // UNCHANGED — stock fetching per category
   useEffect(() => {
-    if (!branchId || !activeCategory) return
+    fetchedIds.current.clear()
+    setStockInfo({})
+    setCart([])
+    loadMenu()
+  }, [selectedBranchId, loadMenu])
+
+  // Stock fetching per category for current active branch
+  useEffect(() => {
+    const bId = selectedBranchId || user?.branchId
+    if (!bId || !activeCategory) return
     const cat = menu.find(c => c.id === activeCategory)
     if (!cat) return
     const unfetched = cat.items.filter(item => !fetchedIds.current.has(item.id))
@@ -566,14 +593,14 @@ export default function POSPage() {
     unfetched.forEach(item => fetchedIds.current.add(item.id))
     Promise.allSettled(
       unfetched.map(item =>
-        menuApi.checkStock(item.id, branchId).then(res => ({ id: item.id, ...res.data }))
+        menuApi.checkStock(item.id, bId).then(res => ({ id: item.id, ...res.data }))
       )
     ).then(results => {
       const updates = {}
       results.forEach(r => { if (r.status === 'fulfilled') updates[r.value.id] = r.value })
       setStockInfo(prev => ({ ...prev, ...updates }))
     })
-  }, [activeCategory, menu, branchId])
+  }, [activeCategory, menu, selectedBranchId, user?.branchId])
 
   // UNCHANGED — derived values
   const currentItems = menu.find(c => c.id === activeCategory)?.items || []
@@ -621,45 +648,132 @@ export default function POSPage() {
     }))
   }
 
-  // UNCHANGED — showBlockedCardPopup
+  // showBlockedCardPopup with branch stock inspection & limiting ingredient details
   function showBlockedCardPopup(item) {
-    const info = stockInfo[item.id]
-    if (!info || !info.hasRecipe) return
+    const info = stockInfo[item.id] || item
+    let lines = []
 
-    const lines = info.ingredients
-      .filter(ing => ing.status === 'OUT_OF_STOCK')
-      .map(ing => ({
+    if (info?.hasRecipe === false || item.hasRecipe === false) {
+      setPopup({
+        title: `${item.name} — Recipe Not Configured`,
+        message: 'This product cannot be ordered because its ingredient recipe has not been configured in the system. Please configure ingredients under Menu Management.',
+        lines: [],
+      })
+      return
+    }
+
+    if (info?.ingredients?.length) {
+      lines = info.ingredients
+        .filter(ing => ing.status === 'OUT_OF_STOCK' || ing.possibleServings <= (info.availableServings ?? 0))
+        .map(ing => ({
+          label:     ing.name,
+          needed:    `${ing.requiredPerServing || ing.required} ${ing.unit}`,
+          available: `${ing.currentStock} ${ing.unit}`,
+          unit:      ing.unit,
+          needsQty:  `${ing.requiredPerServing || ing.required} ${ing.unit} needed per serving`,
+          stockQty:  Number(ing.currentStock) === 0
+            ? 'completely out of stock'
+            : `only ${ing.currentStock} ${ing.unit} in stock (${ing.possibleServings} servings possible)`,
+        }))
+    } else if (item.outOfStockIngredients?.length) {
+      lines = item.outOfStockIngredients.map(ing => ({
         label:     ing.name,
         needed:    `${ing.required} ${ing.unit}`,
-        available: `${ing.currentStock} ${ing.unit}`,
+        available: `${ing.available} ${ing.unit}`,
         unit:      ing.unit,
-        needsQty:  `${ing.required} ${ing.unit} needed per order`,
-        stockQty:  ing.currentStock === 0 ? 'completely out' : `only ${ing.currentStock} left`,
+        needsQty:  `${ing.required} ${ing.unit} needed per serving`,
+        stockQty:  Number(ing.available) === 0 ? 'completely out of stock' : `only ${ing.available} ${ing.unit} left`,
       }))
+    }
+
+    const limitingMsg = info.limitingIngredient?.name
+      ? ` (Limited by ${info.limitingIngredient.name})`
+      : ''
 
     setPopup({
-      title:   `${item.name} is out of stock`,
-      message: 'The following ingredients are insufficient to prepare this item:',
+      title:   `${item.name} — Insufficient Branch Stock${limitingMsg}`,
+      message: lines.length > 0
+        ? 'The following required recipe ingredients limit or prevent preparation in this branch:'
+        : 'This item cannot be ordered because required recipe stock is depleted in this branch.',
       lines,
     })
   }
 
-  // CHANGED — addToCart: identical cart-state logic; only addition is a
-  // showToast() call for UI feedback.
+  // addToCart with recipe verification, limiting ingredient awareness, and available stock validation
   function addToCart(item) {
+    const info = stockInfo[item.id] || item
+    const hasRecipe = info.hasRecipe !== false && item.hasRecipe !== false
+
+    if (!item.isGloballyAvailable || item.isBranchEnabled === false) {
+      showBlockedCardPopup(item)
+      return
+    }
+
+    if (!hasRecipe) {
+      setPopup({
+        title: `${item.name} — Recipe Not Configured`,
+        message: 'This product cannot be sold because its ingredient recipe has not been configured in the system. Configure recipes under Menu Management.',
+        lines: [],
+      })
+      return
+    }
+
+    const maxAvailable = info.availableServings ?? item.availableServings ?? 0
+    if (maxAvailable <= 0) {
+      showBlockedCardPopup(item)
+      return
+    }
+
+    const existing = cart.find(i => i.id === item.id)
+    const currentQty = existing ? (parseInt(existing.qty) || 0) : 0
+
+    if (currentQty + 1 > maxAvailable) {
+      const limitMsg = info.limitingIngredient
+        ? ` Limited by ${info.limitingIngredient.name} (${info.limitingIngredient.currentStock} ${info.limitingIngredient.unit} in branch stock).`
+        : ''
+      setPopup({
+        title: 'Maximum Available Stock Reached',
+        message: `Cannot add more than ${maxAvailable} serving${maxAvailable !== 1 ? 's' : ''} of "${item.name}".${limitMsg}`,
+        lines: (info.ingredients || [])
+          .filter(i => i.possibleServings <= maxAvailable)
+          .map(ing => ({
+            label: ing.name,
+            needed: `${roundDecimals((ing.requiredPerServing || ing.required) * (currentQty + 1), 3)} ${ing.unit}`,
+            available: `${ing.currentStock} ${ing.unit}`,
+            unit: ing.unit,
+            needsQty: `Requires ${ing.requiredPerServing || ing.required} ${ing.unit} per serving`,
+            stockQty: `${ing.currentStock} ${ing.unit} available in branch (${ing.possibleServings} servings max)`,
+          })),
+      })
+      return
+    }
+
     setCart(prev => {
       const ex = prev.find(i => i.id === item.id)
       if (ex) return prev.map(i => i.id === item.id ? { ...i, qty: i.qty + 1 } : i)
       return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1 }]
     })
     setError('')
-    showToast(`Added ${item.name}`) // ADDED — floating confirmation toast
+    showToast(`Added ${item.name} (${currentQty + 1}/${maxAvailable})`)
   }
 
-  // UNCHANGED — adjustQty
+  // adjustQty clamped to available servings
   function adjustQty(id, delta) {
+    const item = menu.flatMap(c => c.items).find(i => i.id === id)
+    const info = stockInfo[id] || item
+    const maxAvailable = info?.availableServings ?? item?.availableServings ?? 999999
+
     setCart(prev =>
-      prev.map(i => i.id === id ? { ...i, qty: (parseInt(i.qty) || 0) + delta } : i).filter(i => i.qty > 0)
+      prev.map(i => {
+        if (i.id !== id) return i
+        const current = parseInt(i.qty) || 0
+        const next = current + delta
+        if (delta > 0 && next > maxAvailable) {
+          showToast(`Only ${maxAvailable} servings available for ${i.name}`)
+          return { ...i, qty: maxAvailable }
+        }
+        return { ...i, qty: next }
+      }).filter(i => i.qty > 0)
     )
   }
 
@@ -685,6 +799,7 @@ export default function POSPage() {
     try {
       const result = await ordersApi.create({
         type:  orderType,
+        branchId: selectedBranchId || user?.branchId,
         items: cart.map(i => ({ menuItemId: i.id, quantity: parseInt(i.qty) || 1 })),
       })
       const orderId = result?.data?.id
@@ -719,18 +834,33 @@ export default function POSPage() {
     }
   }
 
-  // UNCHANGED — getStockBadge
-  function getStockBadge(itemId) {
-    const info = stockInfo[itemId]
-    if (!info || !info.hasRecipe) return null
-    if (!info.canOrder) {
-      return { label: '⛔ Out of stock', bg: '#fef2f2', color: '#dc2626', border: '#fca5a5' }
+  // getStockBadge with branch-specific available servings & limiting ingredient
+  function getStockBadge(item) {
+    const info = stockInfo[item.id] || item
+    const hasRecipe = info.hasRecipe !== false && item.hasRecipe !== false
+
+    if (!item.isGloballyAvailable) {
+      return { label: '🚫 Disabled Globally', bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' }
     }
-    const lowIng = info.ingredients.find(i => i.status === 'LOW_STOCK')
-    if (lowIng) {
-      return { label: `⚠️ Low: ${lowIng.name}`, bg: '#fffbeb', color: '#b45309', border: '#fcd34d' }
+    if (item.isBranchEnabled === false) {
+      return { label: '🚫 Disabled in Branch', bg: '#f3f4f6', color: '#6b7280', border: '#d1d5db' }
     }
-    return null
+    if (!hasRecipe || info.availabilityStatus === 'RECIPE_NOT_CONFIGURED' || item.availabilityStatus === 'RECIPE_NOT_CONFIGURED') {
+      return { label: '⚠️ Recipe Not Configured', bg: '#fef3c7', color: '#92400e', border: '#fde68a' }
+    }
+    if (info.availabilityStatus === 'INVALID_RECIPE_UNIT' || item.availabilityStatus === 'INVALID_RECIPE_UNIT') {
+      return { label: '⚠️ Invalid Recipe Unit', bg: '#fef3c7', color: '#92400e', border: '#fde68a' }
+    }
+
+    const available = info.availableServings ?? item.availableServings ?? 0
+    if (available <= 0 || !info.isStockAvailable || !item.isStockAvailable) {
+      const limiting = info.limitingIngredient?.name ? ` (No ${info.limitingIngredient.name})` : ''
+      return { label: `⛔ Out of Stock${limiting}`, bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' }
+    }
+    if (available <= 10) {
+      return { label: `⚠️ Low Stock: ${available} left`, bg: '#fffbeb', color: '#b45309', border: '#fcd34d' }
+    }
+    return { label: `✓ ${available} servings available`, bg: '#f0fdf4', color: '#166534', border: '#bbf7d0' }
   }
 
   // ── ADDED — reusable order summary block, rendered in both the desktop/
@@ -772,12 +902,23 @@ export default function POSPage() {
                         type="number" min={1} value={item.qty}
                         onChange={e => {
                           const val = parseInt(e.target.value)
-                          if (!isNaN(val) && val > 0) setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: val } : i))
-                          else if (e.target.value === '') setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: '' } : i))
+                          const max = info?.availableServings ?? item.availableServings ?? 999999
+                          if (!isNaN(val) && val > 0) {
+                            if (val > max) {
+                              showToast(`Only ${max} servings available for ${item.name}`)
+                              setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: max } : i))
+                            } else {
+                              setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: val } : i))
+                            }
+                          } else if (e.target.value === '') {
+                            setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: '' } : i))
+                          }
                         }}
                         onBlur={e => {
                           const val = parseInt(e.target.value)
+                          const max = info?.availableServings ?? item.availableServings ?? 999999
                           if (isNaN(val) || val < 1) setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: 1 } : i))
+                          else if (val > max) setCart(prev => prev.map(i => i.id === item.id ? { ...i, qty: max } : i))
                         }}
                         style={{
                           width: 40, textAlign: 'center', fontWeight: 700, fontSize: 13,
@@ -902,6 +1043,53 @@ export default function POSPage() {
       <div className="kiosk-main">
 
         <div className="kiosk-catbar">
+          {/* Branch indicator / switcher */}
+          {isOwner && branches.length > 0 ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--brown-800)' }}>📍 Branch:</span>
+              <select
+                value={selectedBranchId}
+                onChange={e => setSelectedBranchId(Number(e.target.value))}
+                style={{
+                  height: 44,
+                  padding: '0 14px',
+                  borderRadius: 'var(--radius-full)',
+                  border: '2px solid var(--brown-600)',
+                  background: '#fff',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: 'var(--brown-800)',
+                  cursor: 'pointer',
+                  outline: 'none',
+                }}
+              >
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : user?.branch ? (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              marginRight: 8,
+              padding: '0 16px',
+              height: 44,
+              borderRadius: 'var(--radius-full)',
+              background: 'var(--brown-50)',
+              border: '1.5px solid var(--brown-200)',
+              fontSize: 13,
+              fontWeight: 700,
+              color: 'var(--brown-700)',
+              flexShrink: 0,
+            }}>
+              📍 {user.branch.name}
+            </div>
+          ) : null}
+
           {menu.map(cat => (
             <button
               key={cat.id}
@@ -923,7 +1111,7 @@ export default function POSPage() {
 
             {currentItems.map(item => {
               const inCart  = cart.find(i => i.id === item.id)
-              const badge   = getStockBadge(item.id)
+              const badge   = getStockBadge(item)
               const blocked = badge?.label?.startsWith('⛔')
 
               return (
@@ -955,6 +1143,18 @@ export default function POSPage() {
                   <div className="kiosk-card-info">
                     <div className="kiosk-card-name">{item.name}</div>
                     <div className="kiosk-card-price">₱{Number(item.price).toFixed(0)}</div>
+                    {item.hasRecipe && item.availableServings != null && (
+                      <div style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: item.availableServings <= 0 ? '#dc2626' : item.availableServings <= 10 ? '#b45309' : '#15803d',
+                        marginTop: 2,
+                      }}>
+                        {item.availableServings > 0
+                          ? `${item.availableServings} servings available`
+                          : '0 servings left'}
+                      </div>
+                    )}
                   </div>
 
                   <div className="kiosk-card-addbar">

@@ -1,6 +1,6 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { dashboardApi } from '../api/client'
+import { dashboardApi, expensesApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { Button, EmptyState } from '../components/ui'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -323,11 +323,14 @@ async function downloadProfitReportExcel(data, periodLabel, branchLabel) {
 
   ws.columns = [
     { width: 6 },   // #
-    { width: 34 },  // Meal / Item
+    { width: 32 },  // Meal / Item
     { width: 12 },  // Qty Sold
-    { width: 18 },  // Revenue
-    { width: 18 },  // Cost
-    { width: 18 },  // Profit
+    { width: 18 },  // Gross Revenue
+    { width: 14 },  // Discounts
+    { width: 18 },  // Net Revenue
+    { width: 18 },  // COGS / Cost
+    { width: 18 },  // Gross Profit
+    { width: 14 },  // Margin %
     { width: 22 },  // Status
   ]
 
@@ -337,13 +340,13 @@ async function downloadProfitReportExcel(data, periodLabel, branchLabel) {
 
   ws.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 64, height: 64 } })
 
-  ws.mergeCells('B1:G3')
+  ws.mergeCells('B1:J3')
   const nameCell = ws.getCell('B1')
   nameCell.value = "Harvey's Special Crispy Sisig"
   nameCell.font = { bold: true, size: 20, name: 'Arial' }
   nameCell.alignment = { vertical: 'middle', horizontal: 'left' }
 
-  ws.getCell('A5').value = 'Profit Report'
+  ws.getCell('A5').value = 'Executive Profit & Financial Statement'
   ws.getCell('A5').font = { bold: true, size: 14 }
 
   ws.getCell('A6').value = 'Range:'
@@ -353,25 +356,36 @@ async function downloadProfitReportExcel(data, periodLabel, branchLabel) {
   ws.getCell('A8').value = 'Generated:'
   ws.getCell('B8').value = new Date().toLocaleString('en-PH')
 
-  ws.getCell('A10').value = 'TOTAL REVENUE (PHP)'
-  ws.getCell('B10').value = Number(s.totalRevenue || 0)
-  ws.getCell('A10').font = { bold: true }
+  const pnlSummary = [
+    ['Gross Sales (PHP)', Number(s.grossSales || s.totalRevenue || 0)],
+    ['Discounts (PHP)', Number(s.discounts || 0)],
+    ['Net Sales (PHP)', Number(s.netSales || 0)],
+    ['Cost of Goods Sold (COGS) (PHP)', Number(s.totalCogs || s.totalKnownCost || 0)],
+    ['Gross Profit (PHP)', Number(s.grossProfit || s.totalKnownProfit || 0)],
+    ['Gross Profit Margin', `${Number(s.grossProfitMargin || 0).toFixed(2)}%`],
+    ['Operating Expenses (PHP)', Number(s.operatingExpenses || 0)],
+    ['Net Profit (PHP)', Number(s.netProfit || 0)],
+    ['Net Profit Margin', `${Number(s.netProfitMargin || 0).toFixed(2)}%`],
+  ]
 
-  ws.getCell('A11').value = 'TOTAL KNOWN PROFIT (PHP)'
-  ws.getCell('B11').value = Number(s.totalKnownProfit || 0)
-  ws.getCell('A11').font = { bold: true }
+  pnlSummary.forEach((row, idx) => {
+    const rowIdx = 10 + idx
+    ws.getCell(`A${rowIdx}`).value = row[0]
+    ws.getCell(`B${rowIdx}`).value = row[1]
+    ws.getCell(`A${rowIdx}`).font = { bold: true }
+  })
 
-  // ADDED — explicit note when some items' cost is unknown, so this
-  // spreadsheet is never mistaken for a complete profit picture
+  let startItemIdx = 20
   if (s.itemsMissingCostCount > 0) {
-    ws.getCell('A12').value =
-      `⚠ ${s.itemsMissingCostCount} item(s) have unknown cost (₱${Number(s.revenueWithUnknownCost || 0).toFixed(2)} in revenue not included in profit above) — add ingredient prices under Menu > Recipes to include them.`
-    ws.getCell('A12').font = { italic: true, color: { argb: 'FFB91C1C' } }
-    ws.mergeCells('A12:G12')
+    ws.getCell('A19').value =
+      `⚠ ${s.itemsMissingCostCount} item(s) have unknown cost (₱${Number(s.revenueWithUnknownCost || 0).toFixed(2)} in revenue not included in cost above) — add ingredient prices under Menu > Recipes.`
+    ws.getCell('A19').font = { italic: true, color: { argb: 'FFB91C1C' } }
+    ws.mergeCells('A19:J19')
+    startItemIdx = 21
   }
 
-  const headerRowIdx = 14
-  const headers = ['#', 'MEAL / ITEM', 'QTY SOLD', 'REVENUE (PHP)', 'COST (PHP)', 'PROFIT (PHP)', 'STATUS']
+  const headerRowIdx = startItemIdx
+  const headers = ['#', 'MEAL / ITEM', 'QTY SOLD', 'GROSS REV (PHP)', 'DISCOUNTS (PHP)', 'NET SALES (PHP)', 'COGS (PHP)', 'GROSS PROFIT (PHP)', 'MARGIN %', 'STATUS']
   headers.forEach((h, i) => {
     const cell = ws.getCell(headerRowIdx, i + 1)
     cell.value = h
@@ -385,22 +399,28 @@ async function downloadProfitReportExcel(data, periodLabel, branchLabel) {
     ws.getCell(row, 1).value = i + 1
     ws.getCell(row, 2).value = item.name
     ws.getCell(row, 3).value = Number(item.qtySold || 0)
-    ws.getCell(row, 4).value = Number(item.revenue || 0)
-    ws.getCell(row, 5).value = item.costKnown ? Number(item.cost) : 'Unknown'
-    ws.getCell(row, 6).value = item.costKnown ? Number(item.profit) : 'Unknown'
-    ws.getCell(row, 7).value = item.costKnown ? 'OK' : 'Missing recipe/price'
+    ws.getCell(row, 4).value = Number(item.grossRevenue ?? item.revenue ?? 0)
+    ws.getCell(row, 5).value = Number(item.discounts || 0)
+    ws.getCell(row, 6).value = Number(item.netRevenue ?? item.revenue ?? 0)
+    ws.getCell(row, 7).value = item.costKnown ? Number(item.cogs ?? item.cost ?? 0) : 'Unknown'
+    ws.getCell(row, 8).value = item.costKnown ? Number(item.grossProfit ?? item.profit ?? 0) : 'Unknown'
+    ws.getCell(row, 9).value = item.costKnown && item.grossProfitMargin != null ? `${Number(item.grossProfitMargin).toFixed(1)}%` : '—'
+    ws.getCell(row, 10).value = item.costKnown ? 'OK' : 'Missing recipe/price'
     if (!item.costKnown) {
-      ;[5, 6, 7].forEach(c => { ws.getCell(row, c).font = { italic: true, color: { argb: 'FFB91C1C' } } })
+      ;[7, 8, 9, 10].forEach(c => { ws.getCell(row, c).font = { italic: true, color: { argb: 'FFB91C1C' } } })
     }
   })
 
   const totalRow = headerRowIdx + 1 + items.length
   ws.getCell(totalRow, 2).value = 'TOTAL'
   ws.getCell(totalRow, 3).value = items.reduce((sum, i) => sum + Number(i.qtySold || 0), 0)
-  ws.getCell(totalRow, 4).value = Number(s.totalRevenue || 0)
-  ws.getCell(totalRow, 5).value = Number(s.totalKnownCost || 0)
-  ws.getCell(totalRow, 6).value = Number(s.totalKnownProfit || 0)
-  ;[2, 3, 4, 5, 6, 7].forEach(c => {
+  ws.getCell(totalRow, 4).value = Number(s.grossSales || s.totalRevenue || 0)
+  ws.getCell(totalRow, 5).value = Number(s.discounts || 0)
+  ws.getCell(totalRow, 6).value = Number(s.netSales || 0)
+  ws.getCell(totalRow, 7).value = Number(s.totalCogs || s.totalKnownCost || 0)
+  ws.getCell(totalRow, 8).value = Number(s.grossProfit || s.totalKnownProfit || 0)
+  ws.getCell(totalRow, 9).value = `${Number(s.grossProfitMargin || 0).toFixed(1)}%`
+  ;[2, 3, 4, 5, 6, 7, 8, 9, 10].forEach(c => {
     ws.getCell(totalRow, c).font = { bold: true }
     ws.getCell(totalRow, c).border = { top: { style: 'medium', color: { argb: 'FFD97706' } } }
   })
@@ -823,10 +843,7 @@ function SalesReportModal({ branchId, branches, branchLabel, isOwner, onClose })
   )
 }
 
-// ADDED — Profit Report Modal. Same date-range pattern as SalesReportModal,
-// shows revenue/cost/profit per item, and clearly flags items whose cost
-// isn't computable yet (missing recipe or ingredient price under Menu >
-// Recipes) instead of hiding or guessing at the gap.
+// ADDED — Profit Report Modal with full P&L financial breakdown
 function ProfitReportModal({ branchId, branchLabel, onClose }) {
   const today = todayISO()
   const [start, setStart] = useState(today)
@@ -867,23 +884,23 @@ function ProfitReportModal({ branchId, branchLabel, onClose }) {
       padding: 24,
     }}>
       <div style={{
-        background: 'var(--cream)', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 860,
-        maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        background: 'var(--cream)', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 1040,
+        maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
         boxShadow: 'var(--shadow-xl)',
       }}>
         {/* Header */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '18px 22px', borderBottom: '1.5px solid var(--border)',
+          padding: '18px 24px', borderBottom: '1.5px solid var(--border)', background: 'var(--cream)',
         }}>
           <div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--brown-800)' }}>
-              💰 Profit Report
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--brown-800)', margin: 0 }}>
+              💰 Executive Profit & Financial Report
             </h2>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>{branchLabel}</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4, margin: 0 }}>{branchLabel} — Audited COGS & Margin Analysis</p>
           </div>
           <button onClick={onClose} style={{
-            border: 'none', background: 'var(--brown-50)', fontSize: 16, cursor: 'pointer', color: 'var(--text-muted)',
+            border: 'none', background: 'var(--brown-100)', fontSize: 16, cursor: 'pointer', color: 'var(--brown-700)',
             borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>✕</button>
         </div>
@@ -891,7 +908,7 @@ function ProfitReportModal({ branchId, branchLabel, onClose }) {
         {/* Date range controls */}
         <div style={{
           display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
-          padding: '16px 22px', borderBottom: '1.5px solid var(--border)',
+          padding: '16px 24px', borderBottom: '1.5px solid var(--border)', background: '#fff',
         }}>
           <label style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
             From
@@ -913,78 +930,388 @@ function ProfitReportModal({ branchId, branchLabel, onClose }) {
 
           <button onClick={() => downloadProfitReportExcel(reportData, rangeLabel, branchLabel)} disabled={!reportData}
             style={{
-              padding: '9px 18px', borderRadius: 'var(--radius-full)',
+              padding: '9px 20px', borderRadius: 'var(--radius-full)',
               border: '1.5px solid var(--border)', background: '#fff',
               color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5,
               cursor: reportData ? 'pointer' : 'not-allowed', opacity: reportData ? 1 : 0.5,
-            }}>📊 Excel</button>
+              boxShadow: 'var(--shadow-sm)',
+            }}>📊 Export Detailed Excel</button>
         </div>
 
         {!isValidRange && (
-          <div style={{ padding: '12px 22px', fontSize: 12.5, color: '#dc2626' }}>
+          <div style={{ padding: '12px 24px', fontSize: 12.5, color: '#dc2626', background: '#fee2e2' }}>
             "To" date must be on or after "From" date.
           </div>
         )}
 
-        <div style={{ overflowY: 'auto', padding: '18px 22px' }}>
+        <div style={{ overflowY: 'auto', padding: '20px 24px' }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 44, color: 'var(--text-muted)' }}>Loading report…</div>
+            <div style={{ textAlign: 'center', padding: 50, color: 'var(--text-muted)' }}>Loading audited profit metrics…</div>
           ) : items.length ? (
             <>
-              <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                <StatCard label="Total Revenue" value={fmt(s.totalRevenue || 0)} />
-                <StatCard label="Known Profit" value={fmt(s.totalKnownProfit || 0)} color="var(--green-dark)" />
-                <StatCard label="Known Cost" value={fmt(s.totalKnownCost || 0)} />
+              {/* Financial Waterfall Cards */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: 12,
+                marginBottom: 16,
+              }}>
+                <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Gross Sales</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--brown-800)', marginTop: 4 }}>{fmt(s.grossSales || s.totalRevenue || 0)}</div>
+                </div>
+                <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Discounts</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#b91c1c', marginTop: 4 }}>-{fmt(s.discounts || 0)}</div>
+                </div>
+                <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Net Sales</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--brown-800)', marginTop: 4 }}>{fmt(s.netSales || 0)}</div>
+                </div>
+                <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>COGS (Cost)</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--brown-700)', marginTop: 4 }}>{fmt(s.totalCogs || s.totalKnownCost || 0)}</div>
+                </div>
+                <div style={{ background: '#f0fdf4', padding: '14px 16px', borderRadius: 'var(--radius-md)', border: '1px solid #bbf7d0' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#166534', textTransform: 'uppercase' }}>Gross Profit</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#15803d', marginTop: 4 }}>{fmt(s.grossProfit || s.totalKnownProfit || 0)}</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#166534', marginTop: 2 }}>{s.grossProfitMargin || 0}% margin</div>
+                </div>
+                <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Operating Exp.</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--brown-800)', marginTop: 4 }}>{fmt(s.operatingExpenses || 0)}</div>
+                </div>
+                <div style={{
+                  background: (s.netProfit || 0) >= 0 ? '#ecfdf5' : '#fef2f2',
+                  padding: '14px 16px', borderRadius: 'var(--radius-md)',
+                  border: `1.5px solid ${(s.netProfit || 0) >= 0 ? '#6ee7b7' : '#fca5a5'}`
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: (s.netProfit || 0) >= 0 ? '#065f46' : '#991b1b', textTransform: 'uppercase' }}>Net Profit</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: (s.netProfit || 0) >= 0 ? '#047857' : '#dc2626', marginTop: 4 }}>{fmt(s.netProfit || 0)}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: (s.netProfit || 0) >= 0 ? '#065f46' : '#991b1b', marginTop: 2 }}>{s.netProfitMargin || 0}% margin</div>
+                </div>
               </div>
 
-              {/* ADDED — explicit warning banner when some items' cost is
-                  unknown, so this never gets mistaken for the complete
-                  profit picture */}
               {s.itemsMissingCostCount > 0 && (
                 <div style={{
                   background: 'var(--red-light, #fee2e2)', border: '1px solid #fca5a5',
                   borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 16,
                   fontSize: 12.5, color: '#991b1b',
                 }}>
-                  ⚠ {s.itemsMissingCostCount} item(s) below have unknown cost — ₱{fmt(s.revenueWithUnknownCost || 0).replace('₱', '')} in revenue isn't reflected in the profit total above.
-                  Add ingredient prices under <strong>Menu &gt; Recipes</strong> to include them.
+                  ⚠ {s.itemsMissingCostCount} item(s) have unconfigured recipe costs — ₱{fmt(s.revenueWithUnknownCost || 0).replace('₱', '')} in revenue isn't reflected in the profit total above. Configure recipes under <strong>Menu &gt; Recipes</strong>.
                 </div>
               )}
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+              <div style={{ background: '#fff', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--brown-50)' }}>
+                      {['#', 'Meal / Item', 'Qty Sold', 'Gross Rev', 'Discounts', 'Net Sales', 'COGS (Cost)', 'Gross Profit', 'Margin'].map(h => (
+                        <th key={h} style={{
+                          padding: '11px 12px',
+                          textAlign: h === '#' || h === 'Qty Sold' ? 'center' : h === 'Meal / Item' ? 'left' : 'right',
+                          fontWeight: 700, color: 'var(--brown-800)',
+                          borderBottom: '1.5px solid var(--border)',
+                          fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5,
+                        }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item, i) => (
+                      <tr key={item.menuItemId} style={{ borderBottom: '1px solid var(--border-light)', opacity: item.costKnown ? 1 : 0.65 }}>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', color: 'var(--text-faint)', fontWeight: 700 }}>{i + 1}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text-dark)' }}>{item.name}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, color: 'var(--brown-700)' }}>{item.qtySold}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)' }}>{fmt(item.grossRevenue ?? item.revenue)}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#b91c1c' }}>{item.discounts ? `-${fmt(item.discounts)}` : '₱0.00'}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--brown-800)' }}>{fmt(item.netRevenue ?? item.revenue)}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--text-mid)' }}>
+                          {item.costKnown ? fmt(item.cogs ?? item.cost) : <span style={{ color: '#b91c1c', fontStyle: 'italic', fontWeight: 600 }}>Unknown</span>}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: item.costKnown ? '#15803d' : '#b91c1c' }}>
+                          {item.costKnown ? fmt(item.grossProfit ?? item.profit) : <span style={{ fontStyle: 'italic' }}>Missing recipe</span>}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--brown-700)' }}>
+                          {item.costKnown && item.grossProfitMargin != null ? `${item.grossProfitMargin}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <EmptyState icon="💰" title="No completed sales in this date range" />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Operating Expenses Management Modal ───────────────────────────────────────
+function ExpensesModal({ branchId, branches, branchLabel, isOwner, onClose, onUpdated }) {
+  const [expenses, setExpenses] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [error, setError] = useState(null)
+
+  // Form state
+  const [category, setCategory] = useState('SUPPLIES')
+  const [amount, setAmount] = useState('')
+  const [description, setDescription] = useState('')
+  const [expenseDate, setExpenseDate] = useState(todayISO())
+  const [selectedBranchId, setSelectedBranchId] = useState(branchId || (branches[0]?.id ? String(branches[0].id) : ''))
+
+  const fetchExpenses = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = {}
+      if (branchId) params.branchId = branchId
+      const res = await expensesApi.list(params)
+      setExpenses(res.data || [])
+    } catch (err) {
+      setError(err.message || 'Failed to load operating expenses')
+    } finally {
+      setLoading(false)
+    }
+  }, [branchId])
+
+  useEffect(() => {
+    fetchExpenses()
+  }, [fetchExpenses])
+
+  async function handleAddExpense(e) {
+    e.preventDefault()
+    const numAmount = parseFloat(amount)
+    if (isNaN(numAmount) || numAmount <= 0) {
+      setError('Please enter a positive numeric expense amount')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      await expensesApi.create({
+        branchId: selectedBranchId ? parseInt(selectedBranchId, 10) : undefined,
+        category,
+        amount: numAmount,
+        description: description.trim() || undefined,
+        expenseDate,
+      })
+      setAmount('')
+      setDescription('')
+      setShowAddForm(false)
+      await fetchExpenses()
+      if (onUpdated) onUpdated()
+    } catch (err) {
+      setError(err.message || 'Failed to save expense')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteExpense(id) {
+    if (!window.confirm('Are you sure you want to delete this expense record?')) return
+    try {
+      await expensesApi.delete(id)
+      await fetchExpenses()
+      if (onUpdated) onUpdated()
+    } catch (err) {
+      alert(err.message || 'Failed to delete expense')
+    }
+  }
+
+  const totalSpent = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0)
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(28,10,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900,
+      padding: 24,
+    }}>
+      <div style={{
+        background: 'var(--cream)', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 840,
+        maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        boxShadow: 'var(--shadow-xl)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '18px 24px', borderBottom: '1.5px solid var(--border)', background: 'var(--cream)',
+        }}>
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 19, color: 'var(--brown-800)', margin: 0 }}>
+              📋 Operating Expenses Management
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4, margin: 0 }}>
+              {branchLabel} — Rent, utilities, salaries, and operating costs for accurate Net Profit
+            </p>
+          </div>
+          <button onClick={onClose} style={{
+            border: 'none', background: 'var(--brown-100)', fontSize: 16, cursor: 'pointer', color: 'var(--brown-700)',
+            borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>✕</button>
+        </div>
+
+        {/* Action bar */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '14px 24px', borderBottom: '1.5px solid var(--border)', background: '#fff',
+        }}>
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Total Recorded: </span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--brown-800)' }}>{fmt(totalSpent)}</span>
+          </div>
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            style={{
+              padding: '8px 18px', borderRadius: 'var(--radius-full)', border: 'none',
+              background: showAddForm ? 'var(--brown-200)' : 'var(--gradient-primary)',
+              color: showAddForm ? 'var(--brown-800)' : '#fff', fontWeight: 700, fontSize: 12.5,
+              cursor: 'pointer', boxShadow: showAddForm ? 'none' : '0 4px 14px rgba(180,83,9,0.28)',
+            }}
+          >
+            {showAddForm ? '✕ Close Form' : '+ Record New Expense'}
+          </button>
+        </div>
+
+        {/* Error message */}
+        {error && (
+          <div style={{ padding: '10px 24px', background: '#fee2e2', color: '#991b1b', fontSize: 13, borderBottom: '1px solid #fca5a5' }}>
+            ⚠ {error}
+          </div>
+        )}
+
+        {/* Add Expense Form */}
+        {showAddForm && (
+          <form onSubmit={handleAddExpense} style={{
+            padding: '18px 24px', background: 'var(--brown-50)', borderBottom: '1.5px solid var(--border)',
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end',
+          }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--brown-800)', display: 'block', marginBottom: 4 }}>Category</label>
+              <select value={category} onChange={e => setCategory(e.target.value)} style={dateInputStyle}>
+                <option value="RENT">Rent</option>
+                <option value="UTILITIES">Utilities (Electricity, Water, Gas)</option>
+                <option value="SALARIES">Salaries & Wages</option>
+                <option value="SUPPLIES">Supplies & Consumables</option>
+                <option value="MAINTENANCE">Equipment Maintenance</option>
+                <option value="OTHER">Other Operating Expense</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--brown-800)', display: 'block', marginBottom: 4 }}>Amount (₱)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                placeholder="0.00"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                style={dateInputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--brown-800)', display: 'block', marginBottom: 4 }}>Expense Date</label>
+              <input
+                type="date"
+                required
+                value={expenseDate}
+                onChange={e => setExpenseDate(e.target.value)}
+                style={dateInputStyle}
+              />
+            </div>
+
+            {isOwner && branches.length > 0 && (
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--brown-800)', display: 'block', marginBottom: 4 }}>Branch</label>
+                <select value={selectedBranchId} onChange={e => setSelectedBranchId(e.target.value)} style={dateInputStyle}>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--brown-800)', display: 'block', marginBottom: 4 }}>Description / Notes</label>
+              <input
+                type="text"
+                placeholder="e.g. November electric bill, Kitchen equipment grease trap cleaning"
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                style={dateInputStyle}
+              />
+            </div>
+
+            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
+              <button type="button" onClick={() => setShowAddForm(false)} style={secondaryBtnStyle}>Cancel</button>
+              <button type="submit" disabled={saving} style={{ ...primaryBtnStyle, maxWidth: 160 }}>
+                {saving ? 'Saving…' : 'Save Expense'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Expenses List */}
+        <div style={{ overflowY: 'auto', padding: '18px 24px', flex: 1 }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Loading expenses…</div>
+          ) : expenses.length ? (
+            <div style={{ background: '#fff', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--brown-50)' }}>
-                    {['#', 'Meal / Item', 'Qty', 'Revenue', 'Cost', 'Profit'].map(h => (
-                      <th key={h} style={{
-                        padding: '11px 14px',
-                        textAlign: h === '#' || h === 'Qty' ? 'center' : h === 'Meal / Item' ? 'left' : 'right',
-                        fontWeight: 700, color: 'var(--text-muted)',
-                        borderBottom: '1px solid var(--border)',
-                        fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5,
-                      }}>{h}</th>
-                    ))}
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: 'var(--brown-800)' }}>Date</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: 'var(--brown-800)' }}>Category</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: 'var(--brown-800)' }}>Description</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: 'var(--brown-800)' }}>Branch</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--brown-800)' }}>Amount</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 700, color: 'var(--brown-800)' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item, i) => (
-                    <tr key={item.menuItemId} style={{ borderBottom: '1px solid var(--border-light)', opacity: item.costKnown ? 1 : 0.65 }}>
-                      <td style={{ padding: '11px 14px', textAlign: 'center', color: 'var(--text-faint)', fontWeight: 700 }}>{i + 1}</td>
-                      <td style={{ padding: '11px 14px', fontWeight: 600, color: 'var(--text-dark)' }}>{item.name}</td>
-                      <td style={{ padding: '11px 14px', textAlign: 'center', fontWeight: 700, color: 'var(--brown-700)' }}>{item.qtySold}</td>
-                      <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>{fmt(item.revenue)}</td>
-                      <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 600, color: 'var(--text-mid)' }}>
-                        {item.costKnown ? fmt(item.cost) : <span style={{ color: '#b91c1c', fontStyle: 'italic', fontWeight: 600 }}>Unknown</span>}
+                  {expenses.map(e => (
+                    <tr key={e.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-dark)' }}>
+                        {new Date(e.expenseDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
-                      <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 700, color: item.costKnown ? 'var(--brown-800)' : '#b91c1c' }}>
-                        {item.costKnown ? fmt(item.profit) : <span style={{ fontStyle: 'italic' }}>Missing recipe/price</span>}
+                      <td style={{ padding: '10px 14px' }}>
+                        <span style={{
+                          padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+                          background: 'var(--brown-100)', color: 'var(--brown-800)',
+                        }}>
+                          {e.category}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 14px', color: 'var(--text-muted)' }}>{e.description || '—'}</td>
+                      <td style={{ padding: '10px 14px', color: 'var(--text-dark)', fontWeight: 600 }}>{e.branch?.name || 'All'}</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: 'var(--brown-800)' }}>
+                        {fmt(e.amount)}
+                      </td>
+                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                        <button
+                          onClick={() => handleDeleteExpense(e.id)}
+                          style={{
+                            border: 'none', background: 'transparent', color: '#dc2626',
+                            fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                          }}
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </>
+            </div>
           ) : (
-            <EmptyState icon="💰" title="No completed sales in this date range" />
+            <EmptyState icon="📋" title="No operating expenses recorded yet" />
           )}
         </div>
       </div>
@@ -1051,6 +1378,335 @@ function ChartTooltip({ active, payload, label, prefix = '₱' }) {
   )
 }
 
+// ── Production-Ready Best Sellers Component with Multi-Branch Comparison ────────
+function BestSellersSection({ comparisonData, limit, setLimit, isMobile }) {
+  if (!comparisonData) return null
+
+  const isComparison = Boolean(comparisonData.isComparison)
+  const branches = isComparison
+    ? (comparisonData.branches || [])
+    : (comparisonData.branch ? [comparisonData.branch] : [])
+
+  return (
+    <div style={{
+      background: 'var(--cream)',
+      border: '1.5px solid var(--border)',
+      borderRadius: 'var(--radius-lg)',
+      padding: isMobile ? 16 : 24,
+      boxShadow: 'var(--shadow-sm)',
+      marginBottom: 24,
+    }}>
+      {/* Section Header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 20,
+        paddingBottom: 16,
+        borderBottom: '1.5px solid var(--border)',
+      }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <h3 style={{
+              fontFamily: 'var(--font-display)',
+              color: 'var(--brown-800)',
+              fontSize: 20,
+              fontWeight: 800,
+              margin: 0,
+            }}>
+              🏆 Best-Selling Products
+            </h3>
+            {isComparison && (
+              <span style={{
+                background: 'var(--brown-100)',
+                color: 'var(--brown-800)',
+                fontSize: 11,
+                fontWeight: 700,
+                padding: '3px 10px',
+                borderRadius: 'var(--radius-full)',
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+              }}>
+                Branch Comparison
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4, margin: 0 }}>
+            {isComparison
+              ? 'Independent product rankings and units sold per branch — Sta. Cruz, Lumban, and authorized branches'
+              : 'Top performing menu items ranked by units sold for your assigned branch'}
+          </p>
+        </div>
+
+        {/* Top 5 / Top 10 Toggle buttons */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'var(--brown-100)',
+          padding: 3,
+          borderRadius: 'var(--radius-full)',
+        }}>
+          <button
+            type="button"
+            onClick={() => setLimit(5)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-full)',
+              border: 'none',
+              background: limit === 5 ? 'var(--gradient-primary)' : 'transparent',
+              color: limit === 5 ? '#fff' : 'var(--brown-800)',
+              fontWeight: 700,
+              fontSize: 12,
+              cursor: 'pointer',
+              boxShadow: limit === 5 ? '0 2px 8px rgba(180,83,9,0.25)' : 'none',
+              transition: 'all 150ms ease',
+            }}
+          >
+            Top 5
+          </button>
+          <button
+            type="button"
+            onClick={() => setLimit(10)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-full)',
+              border: 'none',
+              background: limit === 10 ? 'var(--gradient-primary)' : 'transparent',
+              color: limit === 10 ? '#fff' : 'var(--brown-800)',
+              fontWeight: 700,
+              fontSize: 12,
+              cursor: 'pointer',
+              boxShadow: limit === 10 ? '0 2px 8px rgba(180,83,9,0.25)' : 'none',
+              transition: 'all 150ms ease',
+            }}
+          >
+            Top 10
+          </button>
+        </div>
+      </div>
+
+      {/* Grid of branches (Side-by-side comparison for Admin, single branch for Cashier) */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isComparison
+          ? (isMobile ? '1fr' : 'repeat(auto-fit, minmax(360px, 1fr))')
+          : '1fr',
+        gap: 20,
+      }}>
+        {branches.map((b) => {
+          const items = (b.items || []).slice(0, limit)
+          const hasSales = items.length > 0 && Number(b.totalUnitsSold || 0) > 0
+
+          return (
+            <div
+              key={b.branchId}
+              style={{
+                background: '#fff',
+                border: '1.5px solid var(--border)',
+                borderRadius: 'var(--radius-lg)',
+                overflow: 'hidden',
+                boxShadow: 'var(--shadow-sm)',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              {/* Branch Header Card */}
+              <div style={{
+                padding: '16px 20px',
+                background: 'linear-gradient(135deg, var(--brown-50) 0%, #fff 100%)',
+                borderBottom: '1.5px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 18 }}>📍</span>
+                    <strong style={{ fontSize: 16, color: 'var(--brown-800)', fontWeight: 800 }}>
+                      {b.branchName}
+                    </strong>
+                    {b.city && (
+                      <span style={{
+                        fontSize: 11.5,
+                        color: 'var(--text-muted)',
+                        background: 'var(--brown-100)',
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontWeight: 600,
+                      }}>
+                        {b.city}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Total Units Sold: <strong style={{ color: 'var(--brown-800)' }}>{b.totalUnitsSold || 0}</strong> &nbsp;·&nbsp;
+                    Sales: <strong style={{ color: 'var(--green, #15803d)' }}>{fmt(b.totalRevenue)}</strong>
+                  </div>
+                </div>
+
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--brown-700)',
+                  background: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  padding: '4px 10px',
+                  borderRadius: 'var(--radius-full)',
+                }}>
+                  {items.length} {items.length === 1 ? 'Product' : 'Products'} Listed
+                </span>
+              </div>
+
+              {/* Branch Items List */}
+              <div style={{ flex: 1, padding: 12 }}>
+                {!hasSales ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '36px 20px',
+                    color: 'var(--text-muted)',
+                  }}>
+                    <span style={{ fontSize: 32, display: 'block', marginBottom: 8, opacity: 0.6 }}>🍽️</span>
+                    <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--brown-800)' }}>
+                      No completed sales found for this period
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 4 }}>
+                      Rankings update automatically when completed orders are recorded.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {items.map((item) => {
+                      const rankBadge =
+                        item.rank === 1 ? '🥇 #1' :
+                        item.rank === 2 ? '🥈 #2' :
+                        item.rank === 3 ? '🥉 #3' :
+                        `#${item.rank}`
+
+                      const rankBg =
+                        item.rank === 1 ? '#fef3c7' :
+                        item.rank === 2 ? '#f3f4f6' :
+                        item.rank === 3 ? '#ffedd5' :
+                        'var(--brown-50)'
+
+                      const rankColor =
+                        item.rank === 1 ? '#92400e' :
+                        item.rank === 2 ? '#4b5563' :
+                        item.rank === 3 ? '#9a3412' :
+                        'var(--brown-700)'
+
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '10px 12px',
+                            borderRadius: 'var(--radius-md)',
+                            border: '1px solid var(--border-light)',
+                            background: '#fff',
+                            transition: 'background 120ms ease',
+                          }}
+                        >
+                          {/* Rank Badge */}
+                          <div style={{
+                            minWidth: 44,
+                            textAlign: 'center',
+                            padding: '4px 6px',
+                            borderRadius: 'var(--radius-full)',
+                            background: rankBg,
+                            color: rankColor,
+                            fontWeight: 800,
+                            fontSize: 11.5,
+                            letterSpacing: 0.2,
+                          }}>
+                            {rankBadge}
+                          </div>
+
+                          {/* Product Thumbnail Photo */}
+                          {item.photo ? (
+                            <img
+                              src={item.photo}
+                              alt={item.name}
+                              style={{
+                                width: 44,
+                                height: 44,
+                                borderRadius: 8,
+                                objectFit: 'cover',
+                                border: '1px solid var(--border)',
+                                flexShrink: 0,
+                              }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: 44,
+                              height: 44,
+                              borderRadius: 8,
+                              background: 'var(--brown-100)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: 20,
+                              border: '1px solid var(--border)',
+                              flexShrink: 0,
+                            }}>
+                              🍽️
+                            </div>
+                          )}
+
+                          {/* Product Details */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                              fontWeight: 700,
+                              fontSize: 13.5,
+                              color: 'var(--brown-900, #1c0a00)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}>
+                              {item.name}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                              {item.category || 'Uncategorized'}
+                            </div>
+                          </div>
+
+                          {/* Units Sold (Primary Metric) & Revenue */}
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <div style={{
+                              display: 'inline-block',
+                              background: 'var(--brown-100)',
+                              color: 'var(--brown-800)',
+                              fontWeight: 800,
+                              fontSize: 12.5,
+                              padding: '3px 9px',
+                              borderRadius: 'var(--radius-full)',
+                            }}>
+                              {item.qty} {item.qty === 1 ? 'unit' : 'units'}
+                            </div>
+                            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--green, #15803d)', marginTop: 3 }}>
+                              {fmt(item.revenue)}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Dashboard Page ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -1066,6 +1722,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState('today')
   const [branchId, setBranchId] = useState('')
+  const [bestSellerLimit, setBestSellerLimit] = useState(5)
 
   // Custom range state (mirrors ForecastPage)
   const [showRangePicker, setShowRangePicker] = useState(false)
@@ -1076,6 +1733,7 @@ export default function DashboardPage() {
   const [showSalesReport, setShowSalesReport] = useState(false)
   // ADDED
   const [showProfitReport, setShowProfitReport] = useState(false)
+  const [showExpenses, setShowExpenses] = useState(false)
 
   useEffect(() => {
     if (isOwner) {
@@ -1239,14 +1897,22 @@ export default function DashboardPage() {
             transition: 'all 180ms ease', whiteSpace: 'nowrap',
           }}>Sales Report</button>
 
-          {/* ADDED — "Profit Report" button, owner/manager only (margins are sensitive) */}
+          {/* ADDED — "Profit Report" & "Expenses" buttons, owner/manager only */}
           {canSeeProfits && (
-            <button onClick={() => setShowProfitReport(true)} style={{
-              padding: '9px 18px', borderRadius: 'var(--radius-full)',
-              border: '1.5px solid var(--border)', background: '#fff',
-              color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
-              transition: 'all 180ms ease', whiteSpace: 'nowrap',
-            }}>💰 Profit Report</button>
+            <>
+              <button onClick={() => setShowProfitReport(true)} style={{
+                padding: '9px 18px', borderRadius: 'var(--radius-full)',
+                border: '1.5px solid var(--border)', background: '#fff',
+                color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+                transition: 'all 180ms ease', whiteSpace: 'nowrap',
+              }}>💰 Profit Report</button>
+              <button onClick={() => setShowExpenses(true)} style={{
+                padding: '9px 18px', borderRadius: 'var(--radius-full)',
+                border: '1.5px solid var(--border)', background: '#fff',
+                color: 'var(--brown-800)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+                transition: 'all 180ms ease', whiteSpace: 'nowrap',
+              }}>📋 Operating Expenses</button>
+            </>
           )}
 
           <Button variant="outline" size="sm" onClick={load}>↻</Button>
@@ -1264,12 +1930,78 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Stat Cards ────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <StatCard icon="💰" label="Total Sales" value={fmt(s.totalSales || 0)} color="var(--brown-800)" />
-        <StatCard icon="🧾" label="Completed Orders" value={s.totalOrders || 0} sub={`Avg ${fmt(s.avgOrderValue || 0)} / order`} />
-        <StatCard icon="📦" label="All Orders" value={s.allOrdersCount || 0} sub={`${s.cancelledCount || 0} cancelled`} />
-      </div>
+      {/* ── Financial & Inventory KPIs ────────────────────────── */}
+      {canSeeProfits ? (
+        <>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: 16,
+            marginBottom: 16,
+          }}>
+            <StatCard
+              icon="💵"
+              label="Net Sales"
+              value={fmt(s.netSales || s.totalSales || 0)}
+              sub={`Gross: ${fmt(s.grossSales || s.totalSales || 0)} · Disc: ${fmt(s.discounts || 0)}`}
+              color="var(--brown-800)"
+            />
+            <StatCard
+              icon="🥩"
+              label="COGS (Ingredient Cost)"
+              value={fmt(s.totalCogs || 0)}
+              sub="Direct ingredients consumed"
+              color="var(--brown-700)"
+            />
+            <StatCard
+              icon="📈"
+              label="Gross Profit"
+              value={fmt(s.grossProfit || 0)}
+              sub={`${s.grossProfitMargin || 0}% gross margin`}
+              color="#15803d"
+            />
+            <StatCard
+              icon="📑"
+              label="Operating Expenses"
+              value={fmt(s.operatingExpenses || 0)}
+              sub="Rent, utilities, salaries, other"
+              color="var(--brown-800)"
+            />
+            <StatCard
+              icon="🏆"
+              label="Net Profit"
+              value={fmt(s.netProfit || 0)}
+              sub={`${s.netProfitMargin || 0}% net margin`}
+              color={(s.netProfit || 0) >= 0 ? '#15803d' : '#dc2626'}
+            />
+            <StatCard
+              icon="📦"
+              label="Inventory Valuation"
+              value={fmt(s.totalInventoryValue || 0)}
+              sub={`${s.lowStockCount || 0} low stock · ${s.outOfStockCount || 0} out of stock`}
+              color="var(--brown-800)"
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+            <StatCard icon="🧾" label="Completed Orders" value={s.totalOrders || 0} sub={`Avg ${fmt(s.avgOrderValue || 0)} / order`} />
+            <StatCard icon="📊" label="Total Transactions" value={s.allOrdersCount || 0} sub={`${s.cancelledCount || 0} cancelled`} />
+          </div>
+        </>
+      ) : (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+          <StatCard icon="💰" label="Total Sales" value={fmt(s.totalSales || 0)} color="var(--brown-800)" />
+          <StatCard icon="🧾" label="Completed Orders" value={s.totalOrders || 0} sub={`Avg ${fmt(s.avgOrderValue || 0)} / order`} />
+          <StatCard icon="📦" label="All Orders" value={s.allOrdersCount || 0} sub={`${s.cancelledCount || 0} cancelled`} />
+        </div>
+      )}
+
+      {/* ── Best-Selling Products Section (Branch Comparison & Role-Based Access) ── */}
+      <BestSellersSection
+        comparisonData={data?.bestSellersComparison}
+        limit={bestSellerLimit}
+        setLimit={setBestSellerLimit}
+        isMobile={isMobile}
+      />
 
       {/* ── Charts row 1 ──────────────────────────────────── */}
       {/* CHANGED — stack to 1 column on mobile instead of squeezing two
@@ -1375,40 +2107,7 @@ export default function DashboardPage() {
         </Section>
       )}
 
-      {/* ── Best Sellers Table ─────────────────────────────── */}
-      {data?.bestSellers?.length > 0 && (
-        <Section title="📋 Best Sellers Detail">
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
-              <thead>
-                <tr style={{ background: 'var(--brown-50)' }}>
-                  {['#', 'Item', 'Qty Sold', 'Revenue'].map(h => (
-                    <th key={h} style={{
-                      padding: '11px 14px',
-                      textAlign: h === '#' || h === 'Qty Sold' || h === 'Revenue' ? 'center' : 'left',
-                      fontWeight: 700, color: 'var(--text-muted)',
-                      borderBottom: '1px solid var(--border)',
-                      fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5,
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.bestSellers.map((item, i) => (
-                  <tr key={item.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                    <td style={{ padding: '11px 14px', textAlign: 'center', color: 'var(--text-faint)', fontWeight: 700 }}>
-                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
-                    </td>
-                    <td style={{ padding: '11px 14px', fontWeight: 600, color: 'var(--text-dark)' }}>{item.name}</td>
-                    <td style={{ padding: '11px 14px', textAlign: 'center', fontWeight: 700, color: 'var(--brown-700)' }}>{item.qty}</td>
-                    <td style={{ padding: '11px 14px', textAlign: 'center', fontWeight: 700, color: 'var(--green)' }}>{fmt(item.revenue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Section>
-      )}
+
 
       {/*   Sales Report modal — itemized meals bought, adjustable date range, default today */}
       {showSalesReport && (
@@ -1427,6 +2126,18 @@ export default function DashboardPage() {
           branchId={branchId}
           branchLabel={branchLabel}
           onClose={() => setShowProfitReport(false)}
+        />
+      )}
+
+      {/* ADDED — Operating Expenses modal */}
+      {showExpenses && (
+        <ExpensesModal
+          branchId={branchId}
+          branches={branches}
+          branchLabel={branchLabel}
+          isOwner={isOwner}
+          onClose={() => setShowExpenses(false)}
+          onUpdated={load}
         />
       )}
     </div>

@@ -20,6 +20,10 @@ model Branch {
   users     User[]
   authLogs  AuthLog[]
   inventory InventoryItem[]
+  expenses  Expense[]
+  branchMenuItems BranchMenuItem[]
+  transfersOut    InventoryTransfer[] @relation("TransferSource")
+  transfersIn     InventoryTransfer[] @relation("TransferDest")
 
   @@map("branches")
 }
@@ -39,7 +43,8 @@ model User {
   branch    Branch   @relation(fields: [branchId], references: [id])
   authLogs  AuthLog[]
   inventoryAuditLogs InventoryAuditLog[] @relation("InventoryAuditActor")
-  
+  expenses  Expense[]
+  transfers InventoryTransfer[]
 
   @@index([branchId])
   @@map("users")
@@ -86,6 +91,7 @@ model MenuItem {
   category    Category    @relation(fields: [categoryId], references: [id])
   orderItems  OrderItem[]
   recipes     MenuItemRecipeIngredient[]
+  branchAvailability BranchMenuItem[]
 
   @@index([categoryId])
   @@index([isAvailable])
@@ -93,31 +99,35 @@ model MenuItem {
 }
 
 model Order {
-  id           Int         @id @default(autoincrement())
-  orderNumber  String      @unique @db.VarChar(30)
-  status       OrderStatus @default(PENDING)
-  type         OrderType   @default(DINE_IN)
-  tableNumber  String?     @db.VarChar(20)
-  customerName String?     @db.VarChar(100)
-  totalAmount  Decimal     @db.Decimal(10, 2)
-  vatableSales Decimal     @default(0.00) @db.Decimal(10, 2)
-  vatAmount    Decimal     @default(0.00) @db.Decimal(10, 2)
-  taxRate      Decimal     @default(12.00) @db.Decimal(5, 2)
-  notes        String?     @db.Text
-  branchId     Int
-  cashierId    Int
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  items        OrderItem[]
-  branch       Branch      @relation(fields: [branchId], references: [id])
-  cashier      User        @relation(fields: [cashierId], references: [id])
-  payments     Payment[]
+  id                 Int         @id @default(autoincrement())
+  orderNumber        String      @unique @db.VarChar(30)
+  status             OrderStatus @default(PENDING)
+  type               OrderType   @default(DINE_IN)
+  tableNumber        String?     @db.VarChar(20)
+  customerName       String?     @db.VarChar(100)
+  totalAmount        Decimal     @db.Decimal(10, 2)
+  cogs               Decimal     @default(0.00) @db.Decimal(12, 2)
+  discountTotal      Decimal     @default(0.00) @db.Decimal(10, 2)
+  inventoryDeducted  Boolean     @default(false)
+  vatableSales       Decimal     @default(0.00) @db.Decimal(10, 2)
+  vatAmount          Decimal     @default(0.00) @db.Decimal(10, 2)
+  taxRate            Decimal     @default(12.00) @db.Decimal(5, 2)
+  notes              String?     @db.Text
+  branchId           Int
+  cashierId          Int
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  items              OrderItem[]
+  branch             Branch      @relation(fields: [branchId], references: [id])
+  cashier            User        @relation(fields: [cashierId], references: [id])
+  payments           Payment[]
   inventoryAuditLogs InventoryAuditLog[]
 
   @@index([branchId])
   @@index([cashierId])
   @@index([status])
   @@index([createdAt])
+  @@index([status, branchId, createdAt])
   @@map("orders")
 }
 
@@ -128,6 +138,8 @@ model OrderItem {
   quantity   Int
   unitPrice  Decimal  @db.Decimal(10, 2)
   subtotal   Decimal  @db.Decimal(10, 2)
+  unitCost   Decimal  @default(0.0000) @db.Decimal(12, 4)
+  cogs       Decimal  @default(0.00) @db.Decimal(12, 2)
   notes      String?  @db.VarChar(255)
   menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -179,15 +191,17 @@ model Ingredient {
   name                       String                     @unique @db.VarChar(150)
   category                   IngredientCategory
   unit                       InventoryUnit
+  yieldPercentage            Decimal                    @default(100.00) @db.Decimal(5, 2)
   defaultConsumptionRateDays Int?
   defaultConsumptionLabel    String?                    @db.VarChar(100)
   defaultDailyDeduction      Decimal?                   @db.Decimal(12, 3)
-  defaultPrice               Decimal?                   @db.Decimal(10, 2)
+  defaultPrice               Decimal?                   @db.Decimal(12, 4)
   defaultMinThreshold        Decimal?                   @db.Decimal(12, 3)
   createdAt                  DateTime                   @default(now())
   updatedAt                  DateTime                   @updatedAt
   inventory                  InventoryItem[]
   recipes                    MenuItemRecipeIngredient[]
+  transfers                  InventoryTransfer[]
 
   @@map("ingredients")
 }
@@ -198,7 +212,7 @@ model InventoryItem {
   branchId            Int
   quantity            Decimal             @db.Decimal(12, 3)
   minThreshold        Decimal             @default(0.000) @db.Decimal(12, 3)
-  price               Decimal?            @db.Decimal(10, 2)
+  price               Decimal?            @db.Decimal(12, 4)
   consumptionRateDays Int?
   consumptionLabel    String?             @db.VarChar(100)
   dailyDeductionAmount Decimal?           @db.Decimal(12, 3)
@@ -217,13 +231,15 @@ model InventoryItem {
 }
 
 model MenuItemRecipeIngredient {
-  id           Int        @id @default(autoincrement())
+  id           Int            @id @default(autoincrement())
   menuItemId   Int
   ingredientId Int
-  quantity     Decimal    @db.Decimal(12, 3)
-  createdAt    DateTime   @default(now())
-  menuItem     MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
-  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  quantity     Decimal        @db.Decimal(12, 3)
+  unit         InventoryUnit?
+  yieldFactor  Decimal        @default(1.00) @db.Decimal(5, 2)
+  createdAt    DateTime       @default(now())
+  menuItem     MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient     @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 
   @@unique([menuItemId, ingredientId])
   @@index([ingredientId])
@@ -231,25 +247,47 @@ model MenuItemRecipeIngredient {
 }
 
 model InventoryAuditLog {
-  id             Int                 @id @default(autoincrement())
+  id              Int                 @id @default(autoincrement())
   inventoryItemId Int
-  actionType     InventoryActionType
-  quantityBefore Decimal             @db.Decimal(12, 3)
-  quantityAfter  Decimal             @db.Decimal(12, 3)
-  quantityChanged Decimal            @db.Decimal(12, 3)
-  note           String?             @db.VarChar(255)
-  orderId        Int?
-  actorUserId    Int?
-  createdAt      DateTime            @default(now())
-  inventoryItem  InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
-  order          Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  actor          User?               @relation("InventoryAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actionType      InventoryActionType
+  quantityBefore  Decimal             @db.Decimal(12, 3)
+  quantityAfter   Decimal             @db.Decimal(12, 3)
+  quantityChanged Decimal             @db.Decimal(12, 3)
+  unitCost        Decimal?            @db.Decimal(12, 4)
+  totalCost       Decimal?            @db.Decimal(12, 2)
+  referenceNo     String?             @db.VarChar(100)
+  note            String?             @db.VarChar(255)
+  orderId         Int?
+  actorUserId     Int?
+  createdAt       DateTime            @default(now())
+  inventoryItem   InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  order           Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  actor           User?               @relation("InventoryAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([inventoryItemId])
   @@index([actionType])
   @@index([createdAt])
   @@index([orderId])
   @@map("inventory_audit_logs")
+}
+
+model Expense {
+  id          Int             @id @default(autoincrement())
+  branchId    Int
+  category    ExpenseCategory @default(OTHER)
+  amount      Decimal         @db.Decimal(10, 2)
+  description String?         @db.VarChar(255)
+  expenseDate DateTime        @default(now())
+  actorUserId Int?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  branch      Branch          @relation(fields: [branchId], references: [id])
+  actor       User?           @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([branchId])
+  @@index([category])
+  @@index([expenseDate])
+  @@map("expenses")
 }
 
 enum Role {
@@ -294,9 +332,10 @@ enum IngredientCategory {
 }
 
 enum InventoryUnit {
-  ML
+  KG
   GRAM
   LITER
+  ML
   PCS
   GALLON
   TANK
@@ -307,12 +346,74 @@ enum InventoryUnit {
 
 enum InventoryActionType {
   ORDER_DEDUCTION
+  ORDER_RESTORE
   DAILY_DEDUCTION
   MANUAL_EDIT
+  RESTOCK
+  WASTAGE
+  TRANSFER_OUT
+  TRANSFER_IN
 }
 
 enum DiscountType {
   SENIOR
   PWD
   STUDENT
+}
+
+enum ExpenseCategory {
+  RENT
+  UTILITIES
+  SALARIES
+  SUPPLIES
+  MAINTENANCE
+  OTHER
+}
+
+model BranchMenuItem {
+  id          Int      @id @default(autoincrement())
+  branchId    Int
+  menuItemId  Int
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, menuItemId])
+  @@index([branchId])
+  @@index([menuItemId])
+  @@map("branch_menu_items")
+}
+
+model InventoryTransfer {
+  id              Int            @id @default(autoincrement())
+  transferNo      String         @unique @db.VarChar(50)
+  sourceBranchId  Int
+  destBranchId    Int
+  ingredientId    Int
+  quantity        Decimal        @db.Decimal(12, 3)
+  unit            InventoryUnit
+  status          TransferStatus @default(COMPLETED)
+  unitCost        Decimal?       @db.Decimal(12, 4)
+  totalCost       Decimal?       @db.Decimal(12, 2)
+  notes           String?        @db.VarChar(255)
+  actorUserId     Int
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  sourceBranch    Branch         @relation("TransferSource", fields: [sourceBranchId], references: [id])
+  destBranch      Branch         @relation("TransferDest", fields: [destBranchId], references: [id])
+  ingredient      Ingredient     @relation(fields: [ingredientId], references: [id])
+  actor           User           @relation(fields: [actorUserId], references: [id])
+
+  @@index([sourceBranchId])
+  @@index([destBranchId])
+  @@index([ingredientId])
+  @@map("inventory_transfers")
+}
+
+enum TransferStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
 }

@@ -1,8 +1,9 @@
 // src/modules/orders/order.service.js
-// Core business logic for Order Management
+// Core business logic for Order Management + COGS Snapshot + Inventory Consistency
 
 const prisma = require('../../config/db');
 const inventoryService = require('../inventory/inventory.service');
+const { roundDecimals } = require('../../utils/inventoryCosting');
 
 // ─────────────────────────────────────────
 // HELPERS
@@ -14,26 +15,24 @@ const inventoryService = require('../inventory/inventory.service');
  * Example: BR1-00042
  */
 async function generateOrderNumber(branchId) {
-  const count = await prisma.order.count({ where: { branchId } });
-  return `BR${branchId}-${String(count + 1).padStart(5, '0')}`;
+  const count = await prisma.order.count({ where: { branchId: Number(branchId) } });
+  let nextSeq = count + 1;
+  let orderNumber = `BR${branchId}-${String(nextSeq).padStart(5, '0')}`;
+
+  // Guard against sequence collisions under concurrent execution
+  while (await prisma.order.findUnique({ where: { orderNumber } })) {
+    nextSeq += 1;
+    orderNumber = `BR${branchId}-${String(nextSeq).padStart(5, '0')}`;
+  }
+  return orderNumber;
 }
 
-// ADDED — server-side source of truth for valid discount types and their
-// percentages. Mirrors the PH_DISCOUNTS map on the frontend (OrdersPage.jsx).
-// Keeping this on the backend too means the server never trusts a raw
-// discountAmount sent by the client — it recalculates the deduction itself
-// from the order's total and the discount type, so the number can't be
-// tampered with client-side.
 const DISCOUNT_TYPES = {
   SENIOR:  { label: 'Senior Citizen', percentage: 20 },
   PWD:     { label: 'PWD',            percentage: 20 },
   STUDENT: { label: 'Student',        percentage: 10 },
 };
 
-// ADDED — PH standard VAT rate. Menu prices are treated as VAT-inclusive
-// (the price on the menu is what the customer pays; VAT is broken out of
-// that number for the receipt/reports, not added on top). Stored per-order
-// as taxRate so historical orders stay accurate if the rate ever changes.
 const VAT_RATE = 12; // percent
 
 /**
@@ -50,20 +49,9 @@ function computeVat(totalAmount, rate = VAT_RATE) {
 // CREATE ORDER
 // ─────────────────────────────────────────
 
-/**
- * Creates a new order with snapshot pricing
- * @param {Object} payload
- * @param {Array}  payload.items         - [{ menuItemId, quantity, notes }]
- * @param {string} payload.type          - DINE_IN | TAKEOUT | DELIVERY
- * @param {string} payload.tableNumber   - Optional
- * @param {string} payload.customerName  - Optional
- * @param {string} payload.notes         - Order-level notes
- * @param {number} payload.branchId      - From JWT
- * @param {number} payload.cashierId     - From JWT
- */
 async function createOrder({ items, type, tableNumber, customerName, notes, branchId, cashierId }) {
-  // 1. Validate and fetch menu items
-  const menuItemIds = items.map((i) => i.menuItemId);
+  // 1. Validate and fetch menu items (globally available)
+  const menuItemIds = items.map((i) => Number(i.menuItemId));
   const menuItems = await prisma.menuItem.findMany({
     where: { id: { in: menuItemIds }, isAvailable: true },
   });
@@ -74,15 +62,50 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
     throw { statusCode: 400, message: `Menu item(s) unavailable or not found: IDs [${missing.join(', ')}]` };
   }
 
-  // 2. Build order items with price snapshot (prevents price drift)
+  // 1b. Validate branch-specific manual disablement
+  const branchOverrides = await prisma.branchMenuItem.findMany({
+    where: {
+      branchId: Number(branchId),
+      menuItemId: { in: menuItemIds },
+      isAvailable: false,
+    },
+    include: { menuItem: { select: { name: true } } },
+  });
+
+  if (branchOverrides.length > 0) {
+    const disabledNames = branchOverrides.map((bo) => bo.menuItem?.name || `ID ${bo.menuItemId}`);
+    throw {
+      statusCode: 400,
+      message: `Menu item(s) are disabled in branch #${branchId}: [${disabledNames.join(', ')}]`,
+    };
+  }
+
+  // 1c. Validate recipe configuration: products must have recipes before selling
+  const recipes = await prisma.menuItemRecipeIngredient.findMany({
+    where: { menuItemId: { in: menuItemIds } },
+    select: { menuItemId: true },
+  });
+  const itemsWithRecipes = new Set(recipes.map((r) => r.menuItemId));
+  const unconfiguredItems = menuItems.filter((m) => !itemsWithRecipes.has(m.id));
+
+  if (unconfiguredItems.length > 0) {
+    const unconfiguredNames = unconfiguredItems.map((m) => m.name).join(', ');
+    throw {
+      statusCode: 400,
+      message: `Cannot place order: Product(s) [${unconfiguredNames}] have no recipe configured. Ingredient requirements cannot be verified.`,
+    };
+  }
+
+  // 2. Build order items with price snapshot
   const orderItemsData = items.map((item) => {
-    const menu = menuItems.find((m) => m.id === item.menuItemId);
+    const menu = menuItems.find((m) => m.id === Number(item.menuItemId));
     const unitPrice = Number(menu.price);
-    const subtotal = unitPrice * item.quantity;
+    const qty = parseInt(item.quantity, 10) || 1;
+    const subtotal = roundDecimals(unitPrice * qty, 2);
 
     return {
-      menuItemId: item.menuItemId,
-      quantity: item.quantity,
+      menuItemId: Number(item.menuItemId),
+      quantity: qty,
       unitPrice,
       subtotal,
       notes: item.notes || null,
@@ -90,73 +113,94 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
   });
 
   // 3. Calculate total
-  const totalAmount = orderItemsData.reduce((sum, i) => sum + i.subtotal, 0);
-
-  // ADDED — compute VAT breakdown from the VAT-inclusive total
+  const totalAmount = roundDecimals(orderItemsData.reduce((sum, i) => sum + i.subtotal, 0), 2);
   const { vatableSales, vatAmount, taxRate } = computeVat(totalAmount);
 
-  // 4. Generate order number
-  const orderNumber = await generateOrderNumber(branchId);
+  // 4 & 5. Persist order, order items, and deduct inventory with COGS snapshots atomically
+  // Includes optimistic collision retry for orderNumber under high concurrency
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const orderNumber = await generateOrderNumber(branchId);
 
-  // 5. Persist in a transaction (order + items atomically)
-  const order = await prisma.$transaction(async (tx) => {
-    const createdOrder = await tx.order.create({
-      data: {
-        orderNumber,
-        type,
-        tableNumber: tableNumber || null,
-        customerName: customerName || null,
-        notes: notes || null,
-        totalAmount,
-        vatableSales,
-        vatAmount,
-        taxRate,
-        branchId,
-        cashierId,
-        items: {
-          create: orderItemsData,
-        },
-      },
-      include: {
-        items: {
-          include: {
-            menuItem: { select: { id: true, name: true, price: true } },
+      const order = await prisma.$transaction(async (tx) => {
+        const createdOrder = await tx.order.create({
+          data: {
+            orderNumber,
+            type,
+            tableNumber: tableNumber || null,
+            customerName: customerName || null,
+            notes: notes || null,
+            totalAmount,
+            vatableSales,
+            vatAmount,
+            taxRate,
+            branchId: Number(branchId),
+            cashierId: Number(cashierId),
+            inventoryDeducted: false,
+            items: {
+              create: orderItemsData,
+            },
           },
-        },
-        cashier: { select: { id: true, name: true } },
-        branch: { select: { id: true, name: true, city: true } },
-      },
-    });
+          include: {
+            items: {
+              include: {
+                menuItem: { select: { id: true, name: true, price: true } },
+              },
+            },
+            cashier: { select: { id: true, name: true } },
+            branch: { select: { id: true, name: true, city: true } },
+          },
+        });
 
-    // 6. Deduct inventory based on configured recipe ingredients.
-    // If stock is insufficient, this throws and the entire transaction rolls back.
-    await inventoryService.deductInventoryForOrder({
-      tx,
-      branchId,
-      orderId: createdOrder.id,
-      items: items.map((item) => ({
-        menuItemId: item.menuItemId,
-        quantity: item.quantity,
-      })),
-    });
+        // 6. Deduct inventory and calculate COGS snapshot for this order
+        // If stock is insufficient, this throws and the whole transaction safely rolls back
+        await inventoryService.deductInventoryForOrder({
+          tx,
+          branchId: Number(branchId),
+          orderId: createdOrder.id,
+          items: createdOrder.items.map((item) => ({
+            menuItemId: item.menuItemId,
+            quantity: item.quantity,
+            orderItemId: item.id,
+          })),
+        });
 
-    return createdOrder;
-  });
+        // Fetch the updated order with COGS snapshots
+        const refreshed = await tx.order.findUnique({
+          where: { id: createdOrder.id },
+          include: {
+            items: {
+              include: {
+                menuItem: { select: { id: true, name: true, price: true } },
+              },
+            },
+            cashier: { select: { id: true, name: true } },
+            branch: { select: { id: true, name: true, city: true } },
+          },
+        });
 
-  return order;
+        return refreshed;
+      });
+
+      return order;
+    } catch (err) {
+      if (err.code === 'P2002' && attempt < 5) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError;
 }
 
 // ─────────────────────────────────────────
-// GET ORDERS (with filters)
+// GET ORDERS
 // ─────────────────────────────────────────
 
-/**
- * List orders for a branch, with optional filters
- * - OWNER can query any branch
- * - CASHIER/MANAGER only see their own branch
- */
 async function getOrders({ branchId, status, type, date, page = 1, limit = 20, userRole, userBranchId }) {
-  // Enforce branch scope for non-admins
   const effectiveBranchId = userRole === 'MANAGER' ? branchId : userBranchId;
 
   const where = {};
@@ -164,7 +208,6 @@ async function getOrders({ branchId, status, type, date, page = 1, limit = 20, u
   if (status) where.status = status;
   if (type) where.type = type;
 
-  // Filter by date (full day)
   if (date) {
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
@@ -223,7 +266,6 @@ async function getOrderById(orderId, { userRole, userBranchId }) {
 
   if (!order) throw { statusCode: 404, message: 'Order not found.' };
 
-  // Non-owners can only view their branch's orders
   if (userRole !== 'OWNER' && order.branchId !== userBranchId) {
     throw { statusCode: 403, message: 'Access denied to this order.' };
   }
@@ -235,11 +277,6 @@ async function getOrderById(orderId, { userRole, userBranchId }) {
 // UPDATE ORDER STATUS
 // ─────────────────────────────────────────
 
-/**
- * Valid status transitions:
- * PENDING → PREPARING → READY → COMPLETED
- * Any → CANCELLED (except COMPLETED)
- */
 const VALID_TRANSITIONS = {
   PENDING:   ['PREPARING', 'CANCELLED'],
   PREPARING: ['READY', 'CANCELLED'],
@@ -248,13 +285,14 @@ const VALID_TRANSITIONS = {
   CANCELLED: ['PENDING'], 
 };
 
-async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId }) {
-  const order = await prisma.order.findUnique({ where: { id: Number(orderId) } });
+async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId, actorUserId }) {
+  const order = await prisma.order.findUnique({
+    where: { id: Number(orderId) },
+    include: { items: true },
+  });
 
   if (!order) throw { statusCode: 404, message: 'Order not found.' };
 
-  // Branch check — any role in same branch can cancel/reopen
-  // Only OWNER can touch other branches
   if (userRole !== 'OWNER' && userRole !== 'ADMIN' && order.branchId !== userBranchId) {
     throw { statusCode: 403, message: 'Access denied to this order.' };
   }
@@ -267,56 +305,93 @@ async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId })
     };
   }
 
-  const updated = await prisma.order.update({
-    where: { id: Number(orderId) },
-    data: { status: newStatus },
-    include: {
-      items:   { include: { menuItem: { select: { id: true, name: true } } } },
-      payments: true,
-      branch:  { select: { id: true, name: true } },
-    },
-  });
+  return prisma.$transaction(async (tx) => {
+    // If transitioning to CANCELLED and inventory was deducted, restore it
+    if (newStatus === 'CANCELLED' && order.inventoryDeducted) {
+      await inventoryService.restoreInventoryForOrder({
+        tx,
+        orderId: order.id,
+        reason: `Status transition to CANCELLED for ${order.orderNumber}`,
+        actorUserId,
+      });
+    }
 
-  return updated;
+    // If reopening a cancelled order (CANCELLED -> PENDING), re-deduct inventory
+    if (order.status === 'CANCELLED' && newStatus === 'PENDING' && !order.inventoryDeducted) {
+      await inventoryService.deductInventoryForOrder({
+        tx,
+        branchId: order.branchId,
+        orderId: order.id,
+        items: order.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, orderItemId: i.id })),
+      });
+    }
+
+    const updated = await tx.order.update({
+      where: { id: Number(orderId) },
+      data: { status: newStatus },
+      include: {
+        items:   { include: { menuItem: { select: { id: true, name: true } } } },
+        payments: true,
+        branch:  { select: { id: true, name: true } },
+      },
+    });
+
+    return updated;
+  });
 }
 
 // ─────────────────────────────────────────
 // CANCEL ORDER
 // ─────────────────────────────────────────
 
-async function cancelOrder(orderId, { userRole, userBranchId }) {
-  console.log('cancelling order:', orderId, 'role:', userRole, 'branchId:', userBranchId)
-  return updateOrderStatus(orderId, 'CANCELLED', { userRole, userBranchId });
+async function cancelOrder(orderId, { userRole, userBranchId, actorUserId }) {
+  const order = await prisma.order.findUnique({
+    where: { id: Number(orderId) },
+  });
+
+  if (!order) throw { statusCode: 404, message: 'Order not found.' };
+
+  if (userRole !== 'OWNER' && userRole !== 'ADMIN' && order.branchId !== userBranchId) {
+    throw { statusCode: 403, message: 'Access denied to this order.' };
+  }
+
+  if (order.status === 'CANCELLED') {
+    throw { statusCode: 400, message: 'Order is already cancelled.' };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // Atomically restore deducted ingredients if any
+    if (order.inventoryDeducted) {
+      await inventoryService.restoreInventoryForOrder({
+        tx,
+        orderId: order.id,
+        reason: `Order cancelled (${order.orderNumber})`,
+        actorUserId,
+      });
+    }
+
+    const updated = await tx.order.update({
+      where: { id: Number(orderId) },
+      data: { status: 'CANCELLED' },
+      include: {
+        items:   { include: { menuItem: { select: { id: true, name: true } } } },
+        payments: true,
+        branch:  { select: { id: true, name: true } },
+      },
+    });
+
+    return updated;
+  });
 }
 
 // ─────────────────────────────────────────
 // PROCESS PAYMENT
 // ─────────────────────────────────────────
 
-/**
- * Process payment for a READY or PENDING order
- * Atomically creates one or more Payment rows + sets order to COMPLETED
- *
- * CHANGED — now accepts discountType (e.g. 'SENIOR', 'PWD', 'STUDENT').
- * The percentage discount is looked up server-side from DISCOUNT_TYPES
- * (never trusted from the client) and used to compute the actual amount
- * due, which the tendered amount(s) are validated against. The resulting
- * discount label/percentage/amount are persisted on every Payment row so
- * reprints and the sales report can show them later.
- *
- * CHANGED — supports split/partial payment across multiple methods.
- * `payments` is an array of tenders, e.g.
- *   [{ method: 'CASH', amountPaid: 100 }, { method: 'GCASH', amountPaid: 16, referenceNo: '...' }]
- * covering a case where cash falls short and a second method settles the
- * remainder. A single-method payment is just an array with one entry —
- * the old { method, amountPaid, referenceNo } shape at the top level is
- * still accepted for backward compatibility and normalized into a
- * one-element array below.
- */
 async function processPayment({ orderId, payments, method, amountPaid, referenceNo, discountType }, { userRole, userBranchId }) {
   const order = await prisma.order.findUnique({
     where: { id: Number(orderId) },
-    include: { payments: true },
+    include: { payments: true, items: true },
   });
 
   if (!order) throw { statusCode: 404, message: 'Order not found.' };
@@ -329,8 +404,6 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
     throw { statusCode: 400, message: 'Order is already completed and paid.' };
   }
 
-  // Normalize: accept either the new `payments` array or the legacy
-  // single { method, amountPaid, referenceNo } shape.
   const tenders = Array.isArray(payments) && payments.length > 0
     ? payments
     : [{ method, amountPaid, referenceNo }];
@@ -341,9 +414,6 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
 
   const originalTotal = Number(order.totalAmount);
 
-  // ADDED — validate discountType (if provided) and compute the deduction
-  // server-side. This is the fix: previously `total` below was always
-  // `order.totalAmount`, ignoring any discount the cashier applied.
   let discount = null;
   if (discountType) {
     const discountConfig = DISCOUNT_TYPES[discountType];
@@ -359,12 +429,7 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
     };
   }
 
-  // CHANGED — total due now factors in the discount, if any
   const total = discount ? Math.max(0, originalTotal - discount.amount) : originalTotal;
-
-  // CHANGED — validate the SUM of all tenders against total due, not a
-  // single amountPaid. This is what makes split payment work: cash can be
-  // short as long as the combined tenders cover the total.
   const totalTendered = tenders.reduce((sum, t) => sum + Number(t.amountPaid), 0);
 
   if (totalTendered < total) {
@@ -374,10 +439,6 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
     };
   }
 
-  // Any overpayment is returned as change. Attribute it to the CASH tender
-  // if one exists (the normal case — change is physical cash handed back);
-  // otherwise fall back to the last tender, in case of an incidental
-  // overpayment on a non-cash method.
   const overpayment = Math.round((totalTendered - total) * 100) / 100;
   const cashIdx = tenders.findIndex((t) => t.method === 'CASH');
   const changeIdx = cashIdx !== -1 ? cashIdx : tenders.length - 1;
@@ -388,31 +449,42 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
     amountPaid: Number(t.amountPaid),
     change: idx === changeIdx ? overpayment : 0,
     referenceNo: t.referenceNo || null,
-    // ADDED — persist discount fields (all null when no discount applied)
     discountType: discount?.type || null,
     discountLabel: discount?.label || null,
     discountPercentage: discount?.percentage || null,
     discountAmount: discount?.amount || null,
   }));
 
-  // Clean up any prior payment rows for this order (e.g. a previously
-  // failed/incomplete attempt) before writing the final settled set —
-  // mirrors the old delete-then-create pattern, now over the whole set.
-  const ops = [];
-  if (order.payments.length > 0) {
-    ops.push(prisma.payment.deleteMany({ where: { orderId: Number(orderId) } }));
-  }
-  ops.push(
-    prisma.payment.createMany({ data: paymentRows }),
-    prisma.order.update({
-      where: { id: Number(orderId) },
-      data: { status: 'COMPLETED' },
-      include: { payments: true },
-    }),
-  );
+  const updatedOrder = await prisma.$transaction(async (tx) => {
+    // Clear old payment rows if any
+    if (order.payments.length > 0) {
+      await tx.payment.deleteMany({ where: { orderId: Number(orderId) } });
+    }
 
-  const results = await prisma.$transaction(ops);
-  const updatedOrder = results[results.length - 1];
+    // Insert new payment tenders
+    await tx.payment.createMany({ data: paymentRows });
+
+    // Idempotency: ensure inventory is deducted and COGS is snapshotted
+    if (!order.inventoryDeducted) {
+      await inventoryService.deductInventoryForOrder({
+        tx,
+        branchId: order.branchId,
+        orderId: order.id,
+        items: order.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, orderItemId: i.id })),
+      });
+    }
+
+    const completed = await tx.order.update({
+      where: { id: Number(orderId) },
+      data: {
+        status: 'COMPLETED',
+        discountTotal: discount?.amount || 0,
+      },
+      include: { payments: true, items: true },
+    });
+
+    return completed;
+  });
 
   return {
     order: updatedOrder,

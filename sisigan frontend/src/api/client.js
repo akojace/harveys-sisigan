@@ -40,12 +40,17 @@ export const menuApi = {
   all:        ()           => request('/menu'),
   create:     (data)       => request('/menu',            { method: 'POST',  body: JSON.stringify(data) }),
   update:     (id, data)   => request(`/menu/${id}`,      { method: 'PATCH', body: JSON.stringify(data) }),
-  toggle:     (id)         => request(`/menu/${id}/toggle`, { method: 'PATCH' }),
+  toggle:     (id, data = {}) => request(`/menu/${id}/toggle`, { method: 'PATCH', body: JSON.stringify(data) }),
   getRecipe: (id) => request(`/menu/${id}/recipe`),
   addRecipeIngredient: (id, data) => request(`/menu/${id}/recipe`, { method: 'POST', body: JSON.stringify(data) }),
   removeRecipeIngredient: (id, ingId) => request(`/menu/${id}/recipe/${ingId}`, { method: 'DELETE' }),
   setRecipe: (id, data) => request(`/menu/${id}/recipe`, { method: 'PUT', body: JSON.stringify(data) }),
   checkStock: (id, branchId) => request(`/menu/${id}/stock-check?branchId=${branchId}`),
+  availability: (id, params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/menu/${id}/availability${q ? '?' + q : ''}`)
+  },
+  matrix: () => request('/menu/matrix'),
 }
 
 // ── Branches ──────────────────────────────────────────────
@@ -61,6 +66,10 @@ export const dashboardApi = {
   get:       (params = {}) => {
     const q = new URLSearchParams(params).toString()
     return request(`/dashboard${q ? '?' + q : ''}`)
+  },
+  bestSellers: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/dashboard/best-sellers${q ? '?' + q : ''}`)
   },
   branches:  () => request('/dashboard/branches'),
   authLogs:  (params = {}) => {
@@ -108,9 +117,23 @@ export const inventoryApi = {
   },
   create: (data) => request('/inventory', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/inventory/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  // ADDED — edit ingredient details (category/unit/price/threshold/
-  // consumption) without touching quantity
   updateDetails: (id, data) => request(`/inventory/${id}/details`, { method: 'PATCH', body: JSON.stringify(data) }),
+  restock: (data) => request('/inventory/restock', { method: 'POST', body: JSON.stringify(data) }),
+  adjust: (data) => request('/inventory/adjust', { method: 'POST', body: JSON.stringify(data) }),
+  transfer: (data) => request('/inventory/transfers', { method: 'POST', body: JSON.stringify(data) }),
+  transfers: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/inventory/transfers${q ? '?' + q : ''}`)
+  },
+}
+
+export const expensesApi = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/expenses${q ? '?' + q : ''}`)
+  },
+  create: (data) => request('/expenses', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id) => request(`/expenses/${id}`, { method: 'DELETE' }),
 }
 
 export const reportsApi = {

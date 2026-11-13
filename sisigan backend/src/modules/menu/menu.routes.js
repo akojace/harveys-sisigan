@@ -22,6 +22,9 @@ router.get('/categories', menuController.getMenuByCategory);
 // GET  /api/menu             - Flat list of all items
 router.get('/', menuController.getAllItems);
 
+// GET  /api/menu/matrix      - Multi-branch availability matrix (OWNER/MANAGER)
+router.get('/matrix', roleMiddleware('OWNER', 'MANAGER'), menuController.getAvailabilityMatrix);
+
 // POST /api/menu             - Add item (OWNER/MANAGER)
 router.post('/', roleMiddleware('OWNER', 'MANAGER'), itemValidation, menuController.createItem);
 
@@ -48,6 +51,9 @@ router.delete('/:id/recipe/:ingId', roleMiddleware('OWNER', 'MANAGER'), menuCont
 
 // GET /api/menu/:id/stock-check?branchId= - Checks if the menu item can be made with current inventory in the specified branch.
 router.get('/:id/stock-check', menuController.checkStock);
+
+// GET /api/menu/:id/availability?branchId= - Detailed availability breakdown and limiting ingredient analysis
+router.get('/:id/availability', menuController.getItemAvailability);
 
 
 module.exports = router;

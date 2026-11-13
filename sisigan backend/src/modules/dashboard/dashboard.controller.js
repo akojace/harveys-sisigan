@@ -56,4 +56,22 @@ async function getIngredientRecommendations(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getDashboard, getBranches, getAuthLogs, getProfitReport, getIngredientRecommendations };
+async function getBestSellers(req, res, next) {
+  try {
+    const { period, from, to, branchId, limit } = req.query;
+    const data = await dashboardService.getBestSellers(
+      { period, from, to, branchId, limit },
+      req.user
+    );
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+module.exports = {
+  getDashboard,
+  getBestSellers,
+  getBranches,
+  getAuthLogs,
+  getProfitReport,
+  getIngredientRecommendations,
+};

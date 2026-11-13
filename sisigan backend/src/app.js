@@ -12,6 +12,7 @@ const userRoutes      = require('./modules/users/user.routes');
 const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
 const branchRoutes    = require('./modules/branches/branch.routes');
 const inventoryRoutes = require('./modules/inventory/inventory.routes');
+const expenseRoutes   = require('./modules/expenses/expense.routes');
 const reportRoutes    = require('./modules/reports/report.routes');
 const auditLogRoutes  = require('./modules/auditLogs/auditLog.routes');
 const errorMiddleware = require('./middleware/error.middleware');
@@ -69,6 +70,7 @@ app.use('/api/users',     userRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/branches',  branchRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/expenses',  expenseRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 

@@ -65,39 +65,39 @@ function round3(n) {
 function getInventorySeedItems() {
   return [
     // SAUCES / CONDIMENTS
-    { name: 'Chilli Oil', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 2, consumptionLabel: '2 days' },
-    { name: 'Dried Garlic', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 2, consumptionLabel: '2 days' },
-    { name: 'Ketchup', category: 'SAUCE', unit: 'PCS', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily' },
-    { name: 'Hot Sauce', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 3, consumptionLabel: '3 days' },
-    { name: 'Suka (Vinegar)', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 3, consumptionLabel: '3 days' },
-    { name: 'Mang Tomas', category: 'SAUCE', unit: 'PCS', quantity: 2, consumptionDays: 1, consumptionLabel: 'Daily' },
-    // Assumption: Knorr stock is 1 pack consumed daily.
-    { name: 'Knorr', category: 'SAUCE', unit: 'PACK', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily' },
-    { name: 'Patis', category: 'SAUCE', unit: 'LITER', quantity: 1, consumptionDays: 14, consumptionLabel: '2 weeks' },
-    { name: 'Mayonnaise', category: 'SAUCE', unit: 'TUB', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily' },
+    { name: 'Chilli Oil', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 2, consumptionLabel: '2 days', price: 0.15 },
+    { name: 'Dried Garlic', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 2, consumptionLabel: '2 days', price: 0.20 },
+    { name: 'Ketchup', category: 'SAUCE', unit: 'PCS', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 45.00 },
+    { name: 'Hot Sauce', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 3, consumptionLabel: '3 days', price: 0.18 },
+    { name: 'Suka (Vinegar)', category: 'SAUCE', unit: 'ML', quantity: 200, consumptionDays: 3, consumptionLabel: '3 days', price: 0.08 },
+    { name: 'Mang Tomas', category: 'SAUCE', unit: 'PCS', quantity: 2, consumptionDays: 1, consumptionLabel: 'Daily', price: 48.00 },
+    { name: 'Knorr', category: 'SAUCE', unit: 'PACK', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 15.00 },
+    { name: 'Patis', category: 'SAUCE', unit: 'LITER', quantity: 1, consumptionDays: 14, consumptionLabel: '2 weeks', price: 60.00 },
+    { name: 'Mayonnaise', category: 'SAUCE', unit: 'TUB', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 180.00 },
 
     // SPICES
-    // Assumption: combined sili inventory is tracked as 300 grams for 2-3 days.
-    { name: 'Sili (Red & Green)', category: 'SPICES', unit: 'GRAM', quantity: 300, consumptionDays: 3, consumptionLabel: '2-3 days' },
-    { name: 'Paminta', category: 'SPICES', unit: 'PACK', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 50 },
+    { name: 'Sili (Red & Green)', category: 'SPICES', unit: 'GRAM', quantity: 300, consumptionDays: 3, consumptionLabel: '2-3 days', price: 0.25 },
+    { name: 'Paminta', category: 'SPICES', unit: 'PACK', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 50.00 },
 
     // MAIN INGREDIENTS
-    { name: 'Silog Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 10000, consumptionDays: null, consumptionLabel: '100 grams per serving' },
-    { name: 'Barkada Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 20000, consumptionDays: null, consumptionLabel: '200 grams per serving' },
-    { name: 'Pizza (Any Flavor)', category: 'MAIN_INGREDIENT', unit: 'PCS', quantity: 18, consumptionDays: null, consumptionLabel: '1 piece per pizza order' },
+    // Silog Meat: ₱280/kg = ₱0.28 per gram (100g serving = ₱28.00)
+    { name: 'Silog Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 10000, consumptionDays: null, consumptionLabel: '100 grams per serving', price: 0.28 },
+    // Barkada Meat: ₱280/kg = ₱0.28 per gram (200g serving = ₱56.00)
+    { name: 'Barkada Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 20000, consumptionDays: null, consumptionLabel: '200 grams per serving', price: 0.28 },
+    { name: 'Pizza (Any Flavor)', category: 'MAIN_INGREDIENT', unit: 'PCS', quantity: 18, consumptionDays: null, consumptionLabel: '1 piece per pizza order', price: 35.00 },
 
     // RICE
-    // Practical conversion: 1 bag is tracked as 50000 grams so 100g per serving deduction can work.
-    { name: 'Bigas', category: 'RICE', unit: 'GRAM', quantity: 50000, consumptionDays: 2, consumptionLabel: '1 bag (2 days)', price: 1350 },
+    // 1 bag = 50,000 grams @ ₱1,350 purchase cost -> Unit Cost = 1350 / 50000 = ₱0.027 per gram
+    { name: 'Bigas', category: 'RICE', unit: 'GRAM', quantity: 50000, consumptionDays: 2, consumptionLabel: '1 bag (2 days)', price: 0.027 },
 
     // UTILITIES
-    { name: 'Tubig', category: 'UTILITIES', unit: 'GALLON', quantity: 5, consumptionDays: 7, consumptionLabel: '1 week', price: 25 },
+    { name: 'Tubig', category: 'UTILITIES', unit: 'GALLON', quantity: 5, consumptionDays: 7, consumptionLabel: '1 week', price: 25.00 },
 
     // GAS
-    { name: 'LPG Gas (Bulalo Kalan)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 14, consumptionLabel: '2 weeks', price: 900 },
-    { name: 'LPG Gas (Sisigan Kalan)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 5, consumptionLabel: '5 days', price: 900 },
-    { name: 'LPG Gas (Rice / Kanin)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 60, consumptionLabel: '2 months', price: 900 },
-    { name: 'LPG Gas (Pizza Oven)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 180, consumptionLabel: '6 months', price: 900 },
+    { name: 'LPG Gas (Bulalo Kalan)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 14, consumptionLabel: '2 weeks', price: 900.00 },
+    { name: 'LPG Gas (Sisigan Kalan)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 5, consumptionLabel: '5 days', price: 900.00 },
+    { name: 'LPG Gas (Rice / Kanin)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 60, consumptionLabel: '2 months', price: 900.00 },
+    { name: 'LPG Gas (Pizza Oven)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 180, consumptionLabel: '6 months', price: 900.00 },
   ].map((item) => ({
     ...item,
     dailyDeduction: item.consumptionDays ? round3(item.quantity / item.consumptionDays) : null,
@@ -198,19 +198,27 @@ async function seedInventoryAndRecipes(branches) {
     const lowerName = menuItem.name.toLowerCase();
     const isSilog = lowerName.includes('silog');
     const isBarkada = menuItem.category?.name === 'Barkada Meals' || lowerName.includes('barkada');
+    const isCombo = menuItem.category?.name === 'Combo Meals' || lowerName.includes('cm') || lowerName.includes('combo');
+    const isPizza = menuItem.category?.name === 'Pizza' || lowerName.includes('pizza');
+    const isSiomaiRice = lowerName.includes('siomairice');
 
     if (isSilog) {
-      recipeRows.push({ menuItemId: menuItem.id, ingredientId: bigas.id, quantity: 100 });
-      recipeRows.push({ menuItemId: menuItem.id, ingredientId: silogMeat.id, quantity: 100 });
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: bigas.id, quantity: 100, unit: 'GRAM', yieldFactor: 1.00 });
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: silogMeat.id, quantity: 100, unit: 'GRAM', yieldFactor: 1.00 });
+    } else if (isCombo) {
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: bigas.id, quantity: 100, unit: 'GRAM', yieldFactor: 1.00 });
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: silogMeat.id, quantity: 100, unit: 'GRAM', yieldFactor: 1.00 });
+    } else if (isSiomaiRice) {
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: bigas.id, quantity: 100, unit: 'GRAM', yieldFactor: 1.00 });
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: silogMeat.id, quantity: 50, unit: 'GRAM', yieldFactor: 1.00 });
     }
 
     if (isBarkada) {
-      recipeRows.push({ menuItemId: menuItem.id, ingredientId: barkadaMeat.id, quantity: 200 });
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: barkadaMeat.id, quantity: 200, unit: 'GRAM', yieldFactor: 1.00 });
     }
 
-    const isPizza = menuItem.category?.name === 'Pizza' || lowerName.includes('pizza');
     if (isPizza) {
-      recipeRows.push({ menuItemId: menuItem.id, ingredientId: pizzaAnyFlavor.id, quantity: 1 });
+      recipeRows.push({ menuItemId: menuItem.id, ingredientId: pizzaAnyFlavor.id, quantity: 1, unit: 'PCS', yieldFactor: 1.00 });
     }
   }
 
@@ -228,7 +236,7 @@ async function main() {
   const branches = await Promise.all([
     prisma.branch.upsert({
       where: { id: 1 },
-      update: {},
+      update: { name: 'Lumban Branch', address: 'Lumban', city: 'Laguna' },
       create: {
         name: 'Lumban Branch',
         address: 'Lumban',
@@ -238,22 +246,32 @@ async function main() {
     }),
     prisma.branch.upsert({
       where: { id: 2 },
-      update: {},
+      update: { name: 'Sta. Cruz Branch', address: 'Sta. Cruz', city: 'Laguna' },
       create: {
-        name: 'Pagsanjan Branch',
-        address: 'Pagsanjan',
+        name: 'Sta. Cruz Branch',
+        address: 'Sta. Cruz',
         city: 'Laguna',
         contactNo: '09171234002',
       },
     }),
     prisma.branch.upsert({
       where: { id: 3 },
-      update: {},
+      update: { name: 'Pagsanjan Branch', address: 'Pagsanjan', city: 'Laguna' },
+      create: {
+        name: 'Pagsanjan Branch',
+        address: 'Pagsanjan',
+        city: 'Laguna',
+        contactNo: '09171234003',
+      },
+    }),
+    prisma.branch.upsert({
+      where: { id: 4 },
+      update: { name: 'Paete Branch', address: 'Paete', city: 'Laguna' },
       create: {
         name: 'Paete Branch',
         address: 'Paete',
         city: 'Laguna',
-        contactNo: '09171234003',
+        contactNo: '09171234004',
       },
     }),
   ]);
@@ -273,37 +291,101 @@ async function main() {
     },
   });
 
-  // ── Manager User ───────────────────────────────────────
+  // ── Manager Users ───────────────────────────────────────
   const managerPassword = await bcrypt.hash('manager123', 12);
   await prisma.user.upsert({
     where: { email: 'manager@sisigan.ph' },
-    update: {},
+    update: { branchId: 1 },
     create: {
-      name: 'Sisigan Manager',
+      name: 'Lumban Manager',
       email: 'manager@sisigan.ph',
       password: managerPassword,
       role: 'MANAGER',
       branchId: 1,
     },
   });
+  await prisma.user.upsert({
+    where: { email: 'manager.lumban@sisigan.ph' },
+    update: { branchId: 1 },
+    create: {
+      name: 'Lumban Manager',
+      email: 'manager.lumban@sisigan.ph',
+      password: managerPassword,
+      role: 'MANAGER',
+      branchId: 1,
+    },
+  });
+  await prisma.user.upsert({
+    where: { email: 'manager.stacruz@sisigan.ph' },
+    update: { branchId: 2 },
+    create: {
+      name: 'Sta. Cruz Manager',
+      email: 'manager.stacruz@sisigan.ph',
+      password: managerPassword,
+      role: 'MANAGER',
+      branchId: 2,
+    },
+  });
 
   // Cashier per branch
   const cashierPassword = await bcrypt.hash('cashier123', 12);
-  const cashiers = await Promise.all(
-    branches.map((branch, i) =>
-      prisma.user.upsert({
-        where: { email: `cashier${i + 1}@sisigan.ph` },
-        update: {},
-        create: {
-          name: `Cashier Branch ${i + 1}`,
-          email: `cashier${i + 1}@sisigan.ph`,
-          password: cashierPassword,
-          role: 'CASHIER',
-          branchId: branch.id,
-        },
-      })
-    )
-  );
+  const cashiers = await Promise.all([
+    prisma.user.upsert({
+      where: { email: 'cashier1@sisigan.ph' },
+      update: { branchId: 1 },
+      create: {
+        name: 'Lumban Cashier',
+        email: 'cashier1@sisigan.ph',
+        password: cashierPassword,
+        role: 'CASHIER',
+        branchId: 1,
+      },
+    }),
+    prisma.user.upsert({
+      where: { email: 'cashier.lumban@sisigan.ph' },
+      update: { branchId: 1 },
+      create: {
+        name: 'Lumban Cashier',
+        email: 'cashier.lumban@sisigan.ph',
+        password: cashierPassword,
+        role: 'CASHIER',
+        branchId: 1,
+      },
+    }),
+    prisma.user.upsert({
+      where: { email: 'cashier.stacruz@sisigan.ph' },
+      update: { branchId: 2 },
+      create: {
+        name: 'Sta. Cruz Cashier',
+        email: 'cashier.stacruz@sisigan.ph',
+        password: cashierPassword,
+        role: 'CASHIER',
+        branchId: 2,
+      },
+    }),
+    prisma.user.upsert({
+      where: { email: 'cashier2@sisigan.ph' },
+      update: { branchId: 2 },
+      create: {
+        name: 'Sta. Cruz Cashier 2',
+        email: 'cashier2@sisigan.ph',
+        password: cashierPassword,
+        role: 'CASHIER',
+        branchId: 2,
+      },
+    }),
+    prisma.user.upsert({
+      where: { email: 'cashier3@sisigan.ph' },
+      update: { branchId: 3 },
+      create: {
+        name: 'Pagsanjan Cashier',
+        email: 'cashier3@sisigan.ph',
+        password: cashierPassword,
+        role: 'CASHIER',
+        branchId: 3,
+      },
+    }),
+  ]);
   console.log(`✅ Created owner + manager + ${cashiers.length} cashiers`);
 
   // ── Menu Categories ────────────────────────────────────

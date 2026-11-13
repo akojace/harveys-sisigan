@@ -9,6 +9,9 @@ router.use(authMiddleware);
 // All authenticated users can see dashboard (service applies role scoping).
 router.get('/', dashboardController.getDashboard);
 
+// Best-Selling Products endpoint with branch comparison and strict role scoping.
+router.get('/best-sellers', dashboardController.getBestSellers);
+
 // Branch list for owner filter dropdown.
 router.get('/branches', roleMiddleware('OWNER'), dashboardController.getBranches);
 

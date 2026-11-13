@@ -2,6 +2,7 @@
  
 const { validationResult } = require('express-validator');
 const orderService = require('./order.service');
+const { validateBranchAccess } = require('../../middleware/branchScope.middleware');
  
 // POST /api/orders
 async function createOrder(req, res, next) {
@@ -11,7 +12,8 @@ async function createOrder(req, res, next) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
  
-    const { items, type, tableNumber, customerName, notes } = req.body;
+    const { items, type, tableNumber, customerName, notes, branchId: requestedBranchId } = req.body;
+    const branchId = validateBranchAccess(req.user, requestedBranchId, { requireSpecificBranch: true });
  
     const order = await orderService.createOrder({
       items,
@@ -19,7 +21,7 @@ async function createOrder(req, res, next) {
       tableNumber,
       customerName,
       notes,
-      branchId: req.user.branchId,
+      branchId,
       cashierId: req.user.id,
     });
  
@@ -36,9 +38,10 @@ async function createOrder(req, res, next) {
 async function getOrders(req, res, next) {
   try {
     const { branchId, status, type, date, page, limit } = req.query;
+    const scopedBranchId = validateBranchAccess(req.user, branchId);
  
     const result = await orderService.getOrders({
-      branchId,
+      branchId: scopedBranchId,
       status,
       type,
       date,
@@ -81,6 +84,7 @@ async function updateOrderStatus(req, res, next) {
     const order = await orderService.updateOrderStatus(req.params.id, status, {
       userRole: req.user.role,
       userBranchId: req.user.branchId,
+      actorUserId: req.user.id,
     });
  
     // Broadcast status change to branch room
@@ -102,6 +106,7 @@ async function cancelOrder(req, res, next) {
     const order = await orderService.cancelOrder(req.params.id, {
       userRole: req.user.role,
       userBranchId: req.user.branchId,
+      actorUserId: req.user.id,
     });
  
     req.io?.to(`branch_${order.branchId}`).emit('order_cancelled', {
@@ -123,14 +128,6 @@ async function processPayment(req, res, next) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
  
-    // CHANGED — also read discountType from the request body and pass it
-    // through to the service. discountAmount is intentionally NOT read here —
-    // the service recalculates the deduction itself server-side so a client
-    // can't submit an arbitrary discount amount.
-    //
-    // CHANGED — reads the new `payments` array (split payment across
-    // multiple methods) in addition to the legacy single method/amountPaid
-    // shape, which the service still accepts for backward compatibility.
     const { payments, method, amountPaid, referenceNo, discountType } = req.body;
  
     const result = await orderService.processPayment(

@@ -329,6 +329,165 @@ function AddQuantitySection({ inventory, isOwner, onSaved }) {
   )
 }
 
+function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClose, onSaved }) {
+  const [sourceBranchId, setSourceBranchId] = useState(isOwner ? (branches[0]?.id || '') : userBranchId)
+  const [destBranchId, setDestBranchId] = useState('')
+  const [ingredientId, setIngredientId] = useState('')
+  const [quantity, setQuantity] = useState('')
+  const [notes, setNotes] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  // Filter available items belonging to source branch
+  const availableItems = useMemo(() => {
+    return inventory.filter((i) => Number(i.branchId) === Number(sourceBranchId) && Number(i.quantity) > 0)
+  }, [inventory, sourceBranchId])
+
+  const selectedItem = availableItems.find((i) => Number(i.ingredientId) === Number(ingredientId))
+  const unit = selectedItem?.ingredient?.unit || 'GRAM'
+
+  // Destination branches (exclude source)
+  const destinationBranches = branches.filter((b) => Number(b.id) !== Number(sourceBranchId))
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!sourceBranchId || !destBranchId || !ingredientId || !quantity) {
+      setError('Please fill in all required fields.')
+      return
+    }
+    const q = Number(quantity)
+    if (isNaN(q) || q <= 0) {
+      setError('Quantity must be greater than zero.')
+      return
+    }
+    if (selectedItem && q > Number(selectedItem.quantity)) {
+      setError(`Cannot transfer ${q} ${unit}. Only ${Number(selectedItem.quantity).toFixed(2)} ${unit} available in source branch.`)
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await inventoryApi.transfer({
+        sourceBranchId: Number(sourceBranchId),
+        destBranchId: Number(destBranchId),
+        ingredientId: Number(ingredientId),
+        quantity: q,
+        unit,
+        notes: notes.trim() || undefined,
+      })
+
+      setSuccess(`Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q} ${unit}.`)
+      setTimeout(() => {
+        onSaved()
+      }, 1200)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Modal title="Inter-Branch Inventory Transfer" onClose={onClose} width={520}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div>}
+        {success && <div style={{ color: 'var(--green-dark)', fontSize: 13, fontWeight: 700 }}>{success}</div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={lbl}>Source Branch *</label>
+            <select
+              value={sourceBranchId}
+              onChange={(e) => { setSourceBranchId(e.target.value); setIngredientId(''); }}
+              style={selectStyle}
+              disabled={!isOwner}
+              required
+            >
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={lbl}>Destination Branch *</label>
+            <select
+              value={destBranchId}
+              onChange={(e) => setDestBranchId(e.target.value)}
+              style={selectStyle}
+              required
+            >
+              <option value="">Select destination...</option>
+              {destinationBranches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={lbl}>Ingredient to Transfer *</label>
+          <select
+            value={ingredientId}
+            onChange={(e) => setIngredientId(e.target.value)}
+            style={selectStyle}
+            required
+          >
+            <option value="">Select available ingredient...</option>
+            {availableItems.map((item) => (
+              <option key={item.id} value={item.ingredientId}>
+                {item.ingredient?.name} (Stock: {Number(item.quantity).toFixed(2)} {item.ingredient?.unit} @ ₱{Number(item.price || item.unitCost || 0).toFixed(2)})
+              </option>
+            ))}
+          </select>
+          {availableItems.length === 0 && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+              No in-stock ingredients available for transfer from this branch.
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+          <Input
+            label={`Transfer Quantity (${unit}) *`}
+            type="number"
+            step="any"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="e.g. 500"
+            required
+          />
+          <div>
+            <label style={lbl}>Unit</label>
+            <input
+              type="text"
+              value={unit}
+              disabled
+              style={{ ...selectStyle, background: 'var(--brown-50)', color: 'var(--text-dark)', cursor: 'default' }}
+            />
+          </div>
+        </div>
+
+        <Input
+          label="Transfer Notes / Justification (Optional)"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="e.g. Emergency replenishment"
+        />
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={loading || !destBranchId || !ingredientId || !quantity}>
+            {loading ? 'Transferring...' : 'Confirm Transfer'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export default function InventoryPage() {
   const { user } = useAuth()
   const isOwner = user?.role === 'OWNER'
@@ -341,14 +500,14 @@ export default function InventoryPage() {
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
   // ADDED — currently-open edit modal's item, or null
   const [editItem, setEditItem] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
-    if (!isOwner) return
     dashboardApi.branches().then((d) => setBranches(d.data || []))
-  }, [isOwner])
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -432,6 +591,19 @@ export default function InventoryPage() {
           )}
           <div style={{ display: 'flex', gap: 10, width: isMobile ? '100%' : undefined }}>
             <Button variant="primary" size="sm" onClick={() => setShowAdd(true)} style={isMobile ? { flex: 1 } : undefined}>+ Add Ingredient</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowTransfer(true)}
+              style={{
+                borderColor: 'var(--brown-600)',
+                color: 'var(--brown-800)',
+                fontWeight: 700,
+                ...(isMobile ? { flex: 1 } : {}),
+              }}
+            >
+              🔄 Transfer Stock
+            </Button>
             <Button variant="outline" size="sm" onClick={load} style={isMobile ? { flex: 1 } : undefined}>Refresh</Button>
           </div>
         </div>
@@ -576,6 +748,17 @@ export default function InventoryPage() {
           item={editItem}
           onClose={() => setEditItem(null)}
           onSaved={async () => { setEditItem(null); await onSavedIngredient() }}
+        />
+      )}
+
+      {showTransfer && (
+        <TransferStockModal
+          isOwner={isOwner}
+          branches={branches}
+          userBranchId={user?.branchId}
+          inventory={inventory}
+          onClose={() => setShowTransfer(false)}
+          onSaved={async () => { setShowTransfer(false); await load() }}
         />
       )}
     </div>

@@ -1,12 +1,13 @@
 const menuService = require('./menu.service');
 const { validationResult } = require('express-validator');
+const { validateBranchAccess } = require('../../middleware/branchScope.middleware');
 
 async function getMenuByCategory(req, res, next) {
   try {
     const includeUnavailable = req.query.includeUnavailable === 'true';
     const includePhoto       = req.query.includePhoto === 'true';
     const enforceStock       = req.query.enforceStock === 'true';
-    const branchId           = req.query.branchId ? Number(req.query.branchId) : req.user?.branchId;
+    const branchId           = validateBranchAccess(req.user, req.query.branchId);
 
     const menu = await menuService.getMenuWithCategories({
       includeUnavailable,
@@ -25,7 +26,7 @@ async function getAllItems(req, res, next) {
     const includeUnavailable = req.query.includeUnavailable === 'true';
     const includePhoto       = req.query.includePhoto === 'true';
     const enforceStock       = req.query.enforceStock === 'true';
-    const branchId           = req.query.branchId ? Number(req.query.branchId) : req.user?.branchId;
+    const branchId           = validateBranchAccess(req.user, req.query.branchId);
 
     const items = await menuService.getAllMenuItems({
       includeUnavailable,
@@ -64,11 +65,19 @@ async function updateItem(req, res, next) {
 
 async function toggleItem(req, res, next) {
   try {
-    const item = await menuService.toggleAvailability(req.params.id);
+    const branchId = req.query.branchId || req.body?.branchId;
+    const isGlobal = req.query.global === 'true' || req.body?.global === true;
+    const scopedBranchId = validateBranchAccess(req.user, branchId);
+
+    const result = await menuService.toggleAvailability(
+      req.params.id,
+      { branchId: scopedBranchId, global: isGlobal },
+      req.user
+    );
     res.json({
       success: true,
-      data: item,
-      message: `Item is now ${item.isAvailable ? 'available' : 'unavailable'}.`
+      data: result,
+      message: result.message,
     });
   } catch (err) {
     next(err);
@@ -91,7 +100,7 @@ async function getRecipe(req, res, next) {
 // Adds one ingredient to the recipe, or updates its quantity if it already exists.
 async function upsertRecipeIngredient(req, res, next) {
   try {
-    const { ingredientId, quantity } = req.body;
+    const { ingredientId, quantity, unit, yieldFactor } = req.body;
     if (!ingredientId || quantity === undefined) {
       return res.status(400).json({
         success: false,
@@ -100,7 +109,7 @@ async function upsertRecipeIngredient(req, res, next) {
     }
     const data = await menuService.upsertRecipeIngredient(
       req.params.id,
-      { ingredientId, quantity }
+      { ingredientId, quantity, unit, yieldFactor }
     );
     res.json({ success: true, data });
   } catch (err) {
@@ -138,11 +147,7 @@ async function setRecipe(req, res, next) {
 // Checks the current inventory stock for every ingredient in this menu item's
 async function checkStock(req, res, next) {
   try {
-    // branchId can come from query string or fall back to the user's own branch
-    const branchId = req.query.branchId ? Number(req.query.branchId) : req.user?.branchId;
-    if (!branchId) {
-      return res.status(400).json({ success: false, message: 'branchId is required.' });
-    }
+    const branchId = validateBranchAccess(req.user, req.query.branchId, { requireSpecificBranch: true });
     const data = await menuService.checkMenuItemStock(req.params.id, branchId);
     res.json({ success: true, data });
   } catch (err) {
@@ -150,6 +155,26 @@ async function checkStock(req, res, next) {
   }
 }
 
+// Detailed availability breakdown for a single item (single branch or all branches for Owner)
+async function getItemAvailability(req, res, next) {
+  try {
+    const branchId = validateBranchAccess(req.user, req.query.branchId);
+    const data = await menuService.getMenuItemAvailability(req.params.id, req.user, { branchId });
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// All products availability matrix across all active branches (Owner & Manager)
+async function getAvailabilityMatrix(req, res, next) {
+  try {
+    const data = await menuService.getMenuAvailabilityMatrix(req.user);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
 
 module.exports = {
   getMenuByCategory,
@@ -162,4 +187,6 @@ module.exports = {
   deleteRecipeIngredient,
   setRecipe,
   checkStock,
+  getItemAvailability,
+  getAvailabilityMatrix,
 };
