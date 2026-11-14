@@ -656,8 +656,12 @@ describe("Harvey's Sisigan — Recipe-Based Sellable Product Stock & Availabilit
   // TEST J: Concurrent purchase (Race condition & overselling prevention)
   // ─────────────────────────────────────────────────────────────────────────────
   it('Test J: Prevents overselling and race conditions under simultaneous checkout', async () => {
-    // testConcurrentSisig requires 1 piece of Special Sauce
-    // Current stock in Sta. Cruz is exactly 1 piece
+    // Ensure Special Sauce stock in Sta. Cruz is exactly 1 piece
+    await prisma.inventoryItem.update({
+      where: { id: staCruzSauceInv.id },
+      data: { quantity: 1 },
+    });
+
     // Launch 2 simultaneous checkout attempts for 1 serving each
     const orderPromises = [
       orderService.createOrder({
@@ -678,14 +682,16 @@ describe("Harvey's Sisigan — Recipe-Based Sellable Product Stock & Availabilit
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
     const rejected = results.filter((r) => r.status === 'rejected');
 
+    for (const f of fulfilled) {
+      if (f.value?.id) {
+        createdOrderIds.push(f.value.id);
+      }
+    }
+
     // Exactly 1 must succeed, exactly 1 must be rejected
     assert.equal(fulfilled.length, 1, 'Exactly 1 concurrent order must succeed');
     assert.equal(rejected.length, 1, 'Exactly 1 concurrent order must fail');
     assert.match(rejected[0].reason.message, /Insufficient stock/i);
-
-    if (fulfilled[0].value?.id) {
-      createdOrderIds.push(fulfilled[0].value.id);
-    }
 
     // Verify remaining stock is exactly 0 and NEVER negative
     const finalSauce = await prisma.inventoryItem.findUnique({

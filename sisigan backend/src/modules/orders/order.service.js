@@ -17,12 +17,13 @@ const { roundDecimals } = require('../../utils/inventoryCosting');
 async function generateOrderNumber(branchId) {
   const count = await prisma.order.count({ where: { branchId: Number(branchId) } });
   let nextSeq = count + 1;
-  let orderNumber = `BR${branchId}-${String(nextSeq).padStart(5, '0')}`;
+  const rand = Math.floor(100 + Math.random() * 900);
+  let orderNumber = `BR${branchId}-${String(nextSeq).padStart(4, '0')}-${rand}`;
 
   // Guard against sequence collisions under concurrent execution
   while (await prisma.order.findUnique({ where: { orderNumber } })) {
     nextSeq += 1;
-    orderNumber = `BR${branchId}-${String(nextSeq).padStart(5, '0')}`;
+    orderNumber = `BR${branchId}-${String(nextSeq).padStart(4, '0')}-${Math.floor(100 + Math.random() * 900)}`;
   }
   return orderNumber;
 }

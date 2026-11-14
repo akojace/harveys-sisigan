@@ -17,6 +17,8 @@ const reportRoutes    = require('./modules/reports/report.routes');
 const auditLogRoutes  = require('./modules/auditLogs/auditLog.routes');
 const errorMiddleware = require('./middleware/error.middleware');
 
+const prisma = require('./config/db');
+
 const app = express();
 
 // ── Core Middleware ───────────────────────────────────
@@ -35,11 +37,36 @@ app.use((req, res, next) => {
 });
 
 // ── Health Check ──────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
+app.get('/health', async (req, res) => {
+  let dbStatus = 'UNKNOWN';
+  try {
+    // Quick non-blocking ping with 3s timeout
+    await Promise.race([
+      prisma.$queryRawUnsafe('SELECT 1'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('DB ping timeout')), 3000)),
+    ]);
+    dbStatus = 'CONNECTED';
+  } catch {
+    dbStatus = 'DISCONNECTED';
+  }
+
+  const isHealthy = dbStatus === 'CONNECTED';
+  res.status(isHealthy ? 200 : 503).json({
+    status: isHealthy ? 'OK' : 'DEGRADED',
+    database: dbStatus,
     service: 'Sisigan Restaurant POS API',
     version: '1.0.0',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ── Database Diagnostics Endpoint ─────────────────────
+// Returns safe connection status and error classification without leaking secrets
+app.get('/health/db', async (req, res) => {
+  const result = await prisma.diagnose();
+  res.status(result.ok ? 200 : 503).json({
+    success: result.ok,
+    ...result,
     timestamp: new Date().toISOString(),
   });
 });

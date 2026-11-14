@@ -27,9 +27,14 @@ describe('Full System Technical and Financial Integration Tests', () => {
 
   describe('1. Perpetual Weighted-Average Restocking & Unit Conversion', () => {
     it('restocks an ingredient with unit conversion (KG -> GRAM) and updates weighted-average cost', async () => {
-      // Find Silog Meat in branch 1
+      // Find Silog Meat in branch 1 and establish baseline
       const silogMeat = await prisma.ingredient.findUnique({ where: { name: 'Silog Meat' } });
       assert.ok(silogMeat);
+
+      await prisma.inventoryItem.update({
+        where: { branchId_ingredientId: { branchId, ingredientId: silogMeat.id } },
+        data: { quantity: 10000, price: 0.28 },
+      });
 
       const beforeItem = await prisma.inventoryItem.findUnique({
         where: { branchId_ingredientId: { branchId, ingredientId: silogMeat.id } },

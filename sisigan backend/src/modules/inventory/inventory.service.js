@@ -595,21 +595,18 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
   // Pre-fetch all branch inventory rows for the ingredients involved
   const allIngredientIds = [...new Set(recipes.map((r) => r.ingredientId))];
 
-  // 1. Acquire exclusive row-level lock in MySQL to prevent concurrent overselling / race conditions
+  // 1. Acquire exclusive row-level lock and fetch current stock under lock in MySQL
+  // to prevent concurrent overselling / race conditions under REPEATABLE READ.
+  let inventoryRows = [];
   if (allIngredientIds.length > 0) {
     const ingIdList = allIngredientIds.map(Number).join(',');
-    await db.$queryRawUnsafe(
-      `SELECT id FROM inventory_items WHERE branchId = ${Number(branchId)} AND ingredientId IN (${ingIdList}) FOR UPDATE`
+    inventoryRows = await db.$queryRawUnsafe(
+      `SELECT id, ingredientId, branchId, quantity, price, minThreshold 
+       FROM inventory_items 
+       WHERE branchId = ${Number(branchId)} AND ingredientId IN (${ingIdList}) AND isActive = 1 
+       FOR UPDATE`
     );
   }
-
-  const inventoryRows = await db.inventoryItem.findMany({
-    where: {
-      branchId: Number(branchId),
-      ingredientId: { in: allIngredientIds },
-      isActive: true,
-    },
-  });
 
   const inventoryByIngredient = new Map(inventoryRows.map((row) => [row.ingredientId, row]));
 
