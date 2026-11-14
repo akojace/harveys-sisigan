@@ -11,6 +11,7 @@ const { Server } = require('socket.io');
 
 const app = require('./src/app');
 const prisma = require('./src/config/db');
+const { getSocketCorsOptions } = require('./src/config/corsConfig');
 const { initSocket } = require('./src/socket/orderSocket');
 const { startInventoryDailyDeductionJob } = require('./src/jobs/inventory.cron');
 
@@ -20,10 +21,7 @@ const PORT = process.env.PORT || 3000;
 const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
-  cors: {
-    origin: process.env.CORS_ORIGIN || '*',
-    methods: ['GET', 'POST'],
-  },
+  cors: getSocketCorsOptions(),
 });
 
 // Pass io instance to Express (used in controllers)

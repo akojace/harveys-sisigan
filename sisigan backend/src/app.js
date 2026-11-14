@@ -16,13 +16,14 @@ const expenseRoutes   = require('./modules/expenses/expense.routes');
 const reportRoutes    = require('./modules/reports/report.routes');
 const auditLogRoutes  = require('./modules/auditLogs/auditLog.routes');
 const errorMiddleware = require('./middleware/error.middleware');
+const { getCorsOptions } = require('./config/corsConfig');
 
 const prisma = require('./config/db');
 
 const app = express();
 
 // ── Core Middleware ───────────────────────────────────
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(cors(getCorsOptions()));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
