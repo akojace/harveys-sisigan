@@ -1,5 +1,5 @@
 // src/pages/MenuPage.jsx
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { menuApi, inventoryApi, branchesApi } from '../api/client'
 import { Button, Input, Modal, Badge, EmptyState, Card } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
