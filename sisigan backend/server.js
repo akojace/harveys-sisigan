@@ -11,6 +11,7 @@ const { Server } = require('socket.io');
 
 const app = require('./src/app');
 const prisma = require('./src/config/db');
+const { autoMigrate } = require('./src/config/autoMigrate');
 const { getSocketCorsOptions } = require('./src/config/corsConfig');
 const { initSocket } = require('./src/socket/orderSocket');
 const { startInventoryDailyDeductionJob } = require('./src/jobs/inventory.cron');
@@ -31,37 +32,49 @@ const io = new Server(httpServer, {
 // Pass io instance to Express (used in controllers)
 app.set('io', io);
 
-// Initialize socket event handlers
-initSocket(io);
-startInventoryDailyDeductionJob();
-startNotificationOutboxWorker();
-
-// ── Start Server ──────────────────────────────────────
-httpServer.listen(PORT, async () => {
-  const dbInfo = prisma.getSanitizedInfo();
-
-  console.log('\n🍖 ==========================================');
-  console.log('   Sisigan Restaurant POS API');
-  console.log('   ==========================================');
-  console.log(`   HTTP:       http://localhost:${PORT}`);
-  console.log(`   Health:     http://localhost:${PORT}/health`);
-  console.log(`   DB Diag:    http://localhost:${PORT}/health/db`);
-  console.log(`   Env:        ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   DB Target:  ${dbInfo.configured ? `${dbInfo.host}:${dbInfo.port}/${dbInfo.database} (user: ${dbInfo.user})` : 'NOT CONFIGURED'}`);
-  console.log('   ==========================================\n');
-
-  // Asynchronous database preflight check
+// ── Start Server Function ─────────────────────────────
+async function startServer() {
+  // 1. Ensure database schema and pending migrations are deployed before starting workers
   try {
-    const diag = await prisma.diagnose();
-    if (diag.ok) {
-      console.log(`✅ [Database] ${diag.message}`);
-    } else {
-      console.error(`⚠️ [Database Warning] [${diag.status}] ${diag.message}`);
-    }
-  } catch (err) {
-    console.error(`❌ [Database Error] Unexpected connection failure: ${err.message}`);
+    await autoMigrate(prisma);
+  } catch (mErr) {
+    console.error('⚠️ [Startup Warning] autoMigrate failed:', mErr.message);
   }
-});
+
+  // 2. Initialize socket event handlers and background workers
+  initSocket(io);
+  startInventoryDailyDeductionJob();
+  startNotificationOutboxWorker();
+
+  // 3. Start HTTP server
+  httpServer.listen(PORT, async () => {
+    const dbInfo = prisma.getSanitizedInfo();
+
+    console.log('\n🍖 ==========================================');
+    console.log('   Sisigan Restaurant POS API');
+    console.log('   ==========================================');
+    console.log(`   HTTP:       http://localhost:${PORT}`);
+    console.log(`   Health:     http://localhost:${PORT}/health`);
+    console.log(`   DB Diag:    http://localhost:${PORT}/health/db`);
+    console.log(`   Env:        ${process.env.NODE_ENV || 'development'}`);
+    console.log(`   DB Target:  ${dbInfo.configured ? `${dbInfo.host}:${dbInfo.port}/${dbInfo.database} (user: ${dbInfo.user})` : 'NOT CONFIGURED'}`);
+    console.log('   ==========================================\n');
+
+    // Asynchronous database preflight check
+    try {
+      const diag = await prisma.diagnose();
+      if (diag.ok) {
+        console.log(`✅ [Database] ${diag.message}`);
+      } else {
+        console.error(`⚠️ [Database Warning] [${diag.status}] ${diag.message}`);
+      }
+    } catch (err) {
+      console.error(`❌ [Database Error] Unexpected connection failure: ${err.message}`);
+    }
+  });
+}
+
+startServer();
 
 // ── Graceful Shutdown ─────────────────────────────────
 async function shutdown(signal) {
