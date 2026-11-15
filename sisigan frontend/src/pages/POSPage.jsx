@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { menuApi, ordersApi, branchesApi } from '../api/client'
 import { Button, EmptyState } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import { getUserBranchId, resolveBranchId } from '../utils/branch'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADDED — kiosk stylesheet. Inline style objects can't express :hover,
@@ -537,8 +538,9 @@ export default function POSPage() {
   const toastTimer = useRef(null)
 
   const isOwner = user?.role === 'OWNER'
+  const userBranchId = getUserBranchId(user)
   const [branches, setBranches] = useState([])
-  const [selectedBranchId, setSelectedBranchId] = useState(user?.branchId || 1)
+  const [selectedBranchId, setSelectedBranchId] = useState(isOwner ? null : userBranchId)
 
   // Fetch branches for Owner branch-switching
   useEffect(() => {
@@ -550,12 +552,12 @@ export default function POSPage() {
           setSelectedBranchId(list[0].id)
         }
       }).catch(() => {})
-    } else if (user?.branchId) {
-      setSelectedBranchId(user.branchId)
+    } else {
+      setSelectedBranchId(userBranchId)
     }
-  }, [isOwner, user?.branchId])
+  }, [isOwner, userBranchId])
 
-  const branchId = selectedBranchId || user?.branchId
+  const branchId = resolveBranchId({ isOwner, selectedBranchId, user })
 
   // ADDED — shows a floating toast for ~1.6s. Purely presentational.
   function showToast(message) {
@@ -567,25 +569,23 @@ export default function POSPage() {
 
   // Branch-scoped menu loading with live stock evaluation
   const loadMenu = useCallback(() => {
-    const bId = selectedBranchId || user?.branchId
-    if (!bId) return
-    menuApi.categories({ branchId: bId, includePhoto: true, enforceStock: false }).then(d => {
+    if (!branchId) return
+    menuApi.categories({ branchId, includePhoto: true, enforceStock: false }).then(d => {
       setMenu(d.data || [])
       if (d.data?.length) setActiveCategory(prev => prev ?? d.data[0].id)
     })
-  }, [selectedBranchId, user?.branchId])
+  }, [branchId])
 
   useEffect(() => {
     fetchedIds.current.clear()
     setStockInfo({})
     setCart([])
     loadMenu()
-  }, [selectedBranchId, loadMenu])
+  }, [branchId, loadMenu])
 
   // Stock fetching per category for current active branch
   useEffect(() => {
-    const bId = selectedBranchId || user?.branchId
-    if (!bId || !activeCategory) return
+    if (!branchId || !activeCategory) return
     const cat = menu.find(c => c.id === activeCategory)
     if (!cat) return
     const unfetched = cat.items.filter(item => !fetchedIds.current.has(item.id))
@@ -593,14 +593,14 @@ export default function POSPage() {
     unfetched.forEach(item => fetchedIds.current.add(item.id))
     Promise.allSettled(
       unfetched.map(item =>
-        menuApi.checkStock(item.id, bId).then(res => ({ id: item.id, ...res.data }))
+        menuApi.checkStock(item.id, branchId).then(res => ({ id: item.id, ...res.data }))
       )
     ).then(results => {
       const updates = {}
       results.forEach(r => { if (r.status === 'fulfilled') updates[r.value.id] = r.value })
       setStockInfo(prev => ({ ...prev, ...updates }))
     })
-  }, [activeCategory, menu, selectedBranchId, user?.branchId])
+  }, [activeCategory, menu, branchId])
 
   // UNCHANGED — derived values
   const currentItems = menu.find(c => c.id === activeCategory)?.items || []
@@ -784,7 +784,7 @@ export default function POSPage() {
 
   // UNCHANGED — placeOrder
   async function placeOrder() {
-    if (!cart.length) return
+    if (!cart.length || !branchId) return
 
     if (hasBlockingError) {
       setPopup({
@@ -799,7 +799,7 @@ export default function POSPage() {
     try {
       const result = await ordersApi.create({
         type:  orderType,
-        branchId: selectedBranchId || user?.branchId,
+        branchId,
         items: cart.map(i => ({ menuItemId: i.id, quantity: parseInt(i.qty) || 1 })),
       })
       const orderId = result?.data?.id

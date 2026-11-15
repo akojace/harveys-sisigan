@@ -4,6 +4,7 @@ import { menuApi, inventoryApi, branchesApi } from '../api/client'
 import { Button, Input, Modal, Badge, EmptyState, Card } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { getUserBranchId, resolveBranchId } from '../utils/branch'
 
 function AddItemModal({ categories, onClose, onSaved }) {
   const [form,    setForm]    = useState({ name: '', price: '', description: '', categoryId: categories[0]?.id || '' })
@@ -791,9 +792,10 @@ export default function MenuPage() {
   const { user } = useAuth()
   const isMobile = useIsMobile()
   const isOwner = user?.role === 'OWNER'
+  const userBranchId = getUserBranchId(user)
 
   const [branches,   setBranches]  = useState([])
-  const [selectedBranchId, setSelectedBranchId] = useState(user?.branchId || 1)
+  const [selectedBranchId, setSelectedBranchId] = useState(isOwner ? null : userBranchId)
   const [menu,       setMenu]      = useState([])
   const [activeTab,  setActiveTab] = useState(null)
   const [showAdd,    setShowAdd]   = useState(false)
@@ -805,6 +807,7 @@ export default function MenuPage() {
   const [search,     setSearch]    = useState('')
 
   const canEdit = isOwner || user?.role === 'MANAGER'
+  const effectiveBranchId = resolveBranchId({ isOwner, selectedBranchId, user })
 
   useEffect(() => {
     if (isOwner) {
@@ -815,15 +818,15 @@ export default function MenuPage() {
           setSelectedBranchId(list[0].id)
         }
       }).catch(() => {})
-    } else if (user?.branchId) {
-      setSelectedBranchId(user.branchId)
+    } else {
+      setSelectedBranchId(userBranchId)
     }
-  }, [isOwner, user?.branchId])
+  }, [isOwner, userBranchId])
 
   async function load() {
-    const bId = selectedBranchId || user?.branchId
+    if (!effectiveBranchId) return
     const data = await menuApi.categories({
-      branchId: bId,
+      branchId: effectiveBranchId,
       includeUnavailable: true,
       enforceStock: false,
     })
@@ -833,13 +836,14 @@ export default function MenuPage() {
 
   useEffect(() => {
     load()
-  }, [selectedBranchId])
+  }, [effectiveBranchId])
 
   async function handleToggle(itemId, { global = false } = {}) {
+    if (!global && !effectiveBranchId) return
     setToggling(itemId)
     try {
       await menuApi.toggle(itemId, {
-        branchId: global ? undefined : (selectedBranchId || user?.branchId),
+        branchId: global ? undefined : effectiveBranchId,
         global,
       })
       await load()
@@ -1173,7 +1177,7 @@ export default function MenuPage() {
         <AvailabilityBreakdownModal
           item={availabilityItem}
           branches={branches}
-          branchId={selectedBranchId}
+          branchId={effectiveBranchId}
           isOwner={isOwner}
           onClose={() => setAvailabilityItem(null)}
         />

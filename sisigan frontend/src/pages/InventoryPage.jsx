@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { inventoryApi, reportsApi, dashboardApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { getUserBranchId } from '../utils/branch'
 import { Button, EmptyState, Modal, Input } from '../components/ui'
 import {
   ResponsiveContainer,
@@ -755,7 +756,7 @@ export default function InventoryPage() {
         <TransferStockModal
           isOwner={isOwner}
           branches={branches}
-          userBranchId={user?.branchId}
+          userBranchId={getUserBranchId(user)}
           inventory={inventory}
           onClose={() => setShowTransfer(false)}
           onSaved={async () => { setShowTransfer(false); await load() }}
