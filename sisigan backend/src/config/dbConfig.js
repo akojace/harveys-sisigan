@@ -106,18 +106,27 @@ async function diagnoseDatabaseConnection(prismaInstance) {
     // 1. Basic query check
     await prismaInstance.$queryRawUnsafe('SELECT 1');
 
-    // 2. Schema check: verify core tables exist
+    // 2. Schema check: verify core tables and alertState column exist
     const tables = await prismaInstance.$queryRawUnsafe(
       `SELECT table_name 
        FROM information_schema.tables 
        WHERE table_schema = DATABASE() 
-         AND table_name IN ('users', 'branches', 'orders', 'menu_items')`
+         AND table_name IN ('users', 'branches', 'orders', 'menu_items', 'notifications', 'notification_outbox')`
+    );
+
+    const alertCols = await prismaInstance.$queryRawUnsafe(
+      `SELECT column_name 
+       FROM information_schema.columns 
+       WHERE table_schema = DATABASE() 
+         AND table_name = 'inventory_items' 
+         AND column_name = 'alertState'`
     );
 
     const foundTables = (Array.isArray(tables) ? tables : []).map(
       (t) => t.TABLE_NAME || t.table_name
     );
 
+    const hasAlertState = Array.isArray(alertCols) && alertCols.length > 0;
     const isSchemaReady = foundTables.length >= 2;
 
     return {
@@ -127,6 +136,7 @@ async function diagnoseDatabaseConnection(prismaInstance) {
         ? 'Database connected and schema verified.'
         : 'Database connected, but core schema tables were not found. Migrations may be needed.',
       schemaReady: isSchemaReady,
+      alertStatePresent: hasAlertState,
       verifiedTables: foundTables,
       info,
     };
