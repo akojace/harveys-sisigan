@@ -158,40 +158,7 @@ async function autoMigrate(prisma) {
       console.log('✅ [AutoMigrate] Created notification_outbox table');
     }
 
-    // Check and record in _prisma_migrations table
-    const migrationCheck = await prisma.$queryRawUnsafe(
-      `SELECT migration_name FROM _prisma_migrations 
-       WHERE migration_name IN (
-         '20261115235500_add_notifications_and_alert_state',
-         '20261116000500_add_notification_outbox'
-       )`
-    );
-
-    const existingMigrations = new Set(
-      (Array.isArray(migrationCheck) ? migrationCheck : []).map((m) => m.migration_name)
-    );
-
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-    if (!existingMigrations.has('20261115235500_add_notifications_and_alert_state')) {
-      const id1 = crypto.randomUUID();
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO \`_prisma_migrations\` (\`id\`, \`checksum\`, \`finished_at\`, \`migration_name\`, \`logs\`, \`started_at\`, \`applied_steps_count\`)
-         VALUES ('${id1}', '7d8966e9345479097cf3c47afa8291e0a4d3a61f8f1f6c0041615411fc895a01', '${now}', '20261115235500_add_notifications_and_alert_state', NULL, '${now}', 1)`
-      );
-      console.log('✅ [AutoMigrate] Recorded migration 20261115235500_add_notifications_and_alert_state in _prisma_migrations');
-    }
-
-    if (!existingMigrations.has('20261116000500_add_notification_outbox')) {
-      const id2 = crypto.randomUUID();
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO \`_prisma_migrations\` (\`id\`, \`checksum\`, \`finished_at\`, \`migration_name\`, \`logs\`, \`started_at\`, \`applied_steps_count\`)
-         VALUES ('${id2}', 'fd6b0e8b4110b796ef3748d08d8261d7697d1663713fdbef3a746290a2cf4c69', '${now}', '20261116000500_add_notification_outbox', NULL, '${now}', 1)`
-      );
-      console.log('✅ [AutoMigrate] Recorded migration 20261116000500_add_notification_outbox in _prisma_migrations');
-    }
-
-    console.log('✅ [AutoMigrate] Database schema verified and up to date.');
+    console.log('✅ [AutoMigrate] Database schema verified.');
   } catch (err) {
     console.error('❌ [AutoMigrate] Error during schema verification:', err.message);
   }
