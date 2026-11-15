@@ -33,4 +33,28 @@ async function toggle(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, create, update, toggle };
+async function dependencies(req, res, next) {
+  try {
+    const data = await branchService.getBranchDependencies(req.params.id);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+}
+
+async function remove(req, res, next) {
+  try {
+    const reassignOwnerToBranchId =
+      req.body?.reassignOwnerToBranchId ?? req.query?.reassignOwnerToBranchId;
+    const data = await branchService.deleteBranch(req.params.id, req.user, {
+      reassignOwnerToBranchId,
+    });
+    res.json({
+      success: true,
+      message: 'Branch and associated records permanently deleted.',
+      deletedBranch: data.deletedBranch,
+      deletedRecords: data.deletedRecords,
+      data,
+    });
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, create, update, toggle, dependencies, remove };

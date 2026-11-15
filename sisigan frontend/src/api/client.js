@@ -55,10 +55,19 @@ export const menuApi = {
 
 // ── Branches ──────────────────────────────────────────────
 export const branchesApi = {
-  list:   ()         => request('/branches'),
-  create: (data)     => request('/branches',           { method: 'POST',  body: JSON.stringify(data) }),
-  update: (id, data) => request(`/branches/${id}`,     { method: 'PATCH', body: JSON.stringify(data) }),
-  toggle: (id)       => request(`/branches/${id}/toggle`, { method: 'PATCH' }),
+  list:         ()         => request('/branches'),
+  create:       (data)     => request('/branches',                { method: 'POST',   body: JSON.stringify(data) }),
+  update:       (id, data) => request(`/branches/${id}`,          { method: 'PATCH',  body: JSON.stringify(data) }),
+  toggle:       (id)       => request(`/branches/${id}/toggle`,   { method: 'PATCH' }),
+  dependencies: (id)       => request(`/branches/${id}/dependencies`),
+  remove:       (id, reassignOwnerToBranchId) =>
+    request(
+      `/branches/${id}${reassignOwnerToBranchId ? `?reassignOwnerToBranchId=${reassignOwnerToBranchId}` : ''}`,
+      {
+        method: 'DELETE',
+        ...(reassignOwnerToBranchId ? { body: JSON.stringify({ reassignOwnerToBranchId }) } : {}),
+      }
+    ),
 }
 
 // ── Dashboard ─────────────────────────────────────────────
@@ -125,6 +134,10 @@ export const inventoryApi = {
     const q = new URLSearchParams(params).toString()
     return request(`/inventory/transfers${q ? '?' + q : ''}`)
   },
+  dependencies: (id, branchId) =>
+    request(`/inventory/${id}/dependencies${branchId ? `?branchId=${branchId}` : ''}`),
+  remove: (id, branchId) =>
+    request(`/inventory/${id}${branchId ? `?branchId=${branchId}` : ''}`, { method: 'DELETE' }),
 }
 
 export const expensesApi = {
@@ -141,4 +154,17 @@ export const reportsApi = {
     const q = new URLSearchParams(params).toString()
     return request(`/reports${q ? '?' + q : ''}`)
   },
+}
+
+export const notificationsApi = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/notifications${q ? '?' + q : ''}`)
+  },
+  summary: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/notifications/summary${q ? '?' + q : ''}`)
+  },
+  markAsRead: (id) => request(`/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllAsRead: () => request('/notifications/read-all', { method: 'PATCH' }),
 }

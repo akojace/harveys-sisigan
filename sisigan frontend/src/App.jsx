@@ -1,6 +1,7 @@
 // src/App.jsx - UPDATED
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { NotificationProvider } from './context/NotificationContext'
 import Navbar from './components/layout/Navbar'
 // Add this import at the top with the others
 import SalesAnalyticsDashboard from './pages/SalesAnalyticsDashboard'
@@ -59,11 +60,13 @@ function ProtectedLayout() {
 export default function App() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />  {/* NEW */}
-        <Route path="/*"     element={<ProtectedLayout />} />
-      </Routes>
+      <NotificationProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />  {/* NEW */}
+          <Route path="/*"     element={<ProtectedLayout />} />
+        </Routes>
+      </NotificationProvider>
     </AuthProvider>
   )
 }

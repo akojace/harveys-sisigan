@@ -28,4 +28,10 @@ router.patch('/:id',      branchController.update);
 // PATCH  /api/branches/:id/toggle — activate / deactivate
 router.patch('/:id/toggle', branchController.toggle);
 
+// GET    /api/branches/:id/dependencies — inspect dependent records before deletion
+router.get('/:id/dependencies', branchController.dependencies);
+
+// DELETE /api/branches/:id — permanently delete branch if no protected records exist
+router.delete('/:id', branchController.remove);
+
 module.exports = router;

@@ -1,6 +1,7 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { dashboardApi, expensesApi } from '../api/client'
+import { useNavigate } from 'react-router-dom'
+import { dashboardApi, expensesApi, notificationsApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { Button, EmptyState } from '../components/ui'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -1734,6 +1735,8 @@ export default function DashboardPage() {
   // ADDED
   const [showProfitReport, setShowProfitReport] = useState(false)
   const [showExpenses, setShowExpenses] = useState(false)
+  const [alertSummary, setAlertSummary] = useState(null)
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (isOwner) {
@@ -1748,12 +1751,16 @@ export default function DashboardPage() {
       if (branchId) params.branchId = branchId
       if (period === 'custom' && customStart) params.from = customStart
       if (period === 'custom' && customEnd) params.to = customEnd
-      const res = await dashboardApi.get(params)
+      const [res, summaryRes] = await Promise.all([
+        dashboardApi.get(params),
+        notificationsApi.summary(isOwner && branchId ? { branchId } : {}).catch(() => null),
+      ])
       setData(res.data)
+      if (summaryRes?.data) setAlertSummary(summaryRes.data)
     } finally {
       setLoading(false)
     }
-  }, [period, branchId, customStart, customEnd])
+  }, [period, branchId, customStart, customEnd, isOwner])
 
   useEffect(() => { load() }, [load])
 
@@ -1992,6 +1999,82 @@ export default function DashboardPage() {
           <StatCard icon="💰" label="Total Sales" value={fmt(s.totalSales || 0)} color="var(--brown-800)" />
           <StatCard icon="🧾" label="Completed Orders" value={s.totalOrders || 0} sub={`Avg ${fmt(s.avgOrderValue || 0)} / order`} />
           <StatCard icon="📦" label="All Orders" value={s.allOrdersCount || 0} sub={`${s.cancelledCount || 0} cancelled`} />
+        </div>
+      )}
+
+      {/* ── Compact Inventory Alerts Panel ── */}
+      {alertSummary && (
+        <div style={{
+          background: '#fff',
+          border: `1.5px solid ${alertSummary.unresolvedCriticalAlerts > 0 ? '#fecaca' : 'var(--border)'}`,
+          borderRadius: 'var(--radius-lg)',
+          padding: isMobile ? 14 : '16px 20px',
+          marginBottom: 24,
+          boxShadow: 'var(--shadow-sm)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 320px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--brown-900)' }}>
+                Inventory Alerts
+              </span>
+              <span style={{
+                fontSize: 11, fontWeight: 800, padding: '3px 9px', borderRadius: '999px',
+                background: alertSummary.totalActiveStockoutAlerts > 0 ? '#fee2e2' : '#f3f4f6',
+                color: alertSummary.totalActiveStockoutAlerts > 0 ? '#991b1b' : '#4b5563',
+              }}>
+                {alertSummary.totalActiveStockoutAlerts} Out of Stock
+              </span>
+              <span style={{
+                fontSize: 11, fontWeight: 800, padding: '3px 9px', borderRadius: '999px',
+                background: alertSummary.totalLowStockWarnings > 0 ? '#fef3c7' : '#f3f4f6',
+                color: alertSummary.totalLowStockWarnings > 0 ? '#92400e' : '#4b5563',
+              }}>
+                {alertSummary.totalLowStockWarnings} Low Stock
+              </span>
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: '999px',
+                background: '#f3f4f6', color: '#374151',
+              }}>
+                {alertSummary.unresolvedCriticalAlerts} Unresolved Critical
+              </span>
+            </div>
+
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+              {alertSummary.affectedBranches?.length > 0 ? (
+                <span>
+                  Branches affected:{' '}
+                  <strong style={{ color: 'var(--brown-800)' }}>
+                    {alertSummary.affectedBranches.map((b) => b.name).join(', ')}
+                  </strong>
+                </span>
+              ) : (
+                <span>All monitored branch inventory levels are currently healthy.</span>
+              )}
+              {alertSummary.mostRecentAlert && (
+                <span>
+                  {' '}· Latest:{' '}
+                  <strong style={{ color: 'var(--brown-800)' }}>
+                    {alertSummary.mostRecentAlert.title}
+                  </strong>{' '}
+                  ({alertSummary.mostRecentAlert.itemName} at {alertSummary.mostRecentAlert.branchName})
+                </span>
+              )}
+            </div>
+          </div>
+
+          {(isOwner || user?.role === 'MANAGER') && (
+            <Button
+              variant="outline"
+              onClick={() => navigate(alertSummary.mostRecentAlert?.actionUrl || '/inventory')}
+            >
+              View Inventory
+            </Button>
+          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@
 
 const prisma = require('../../config/db');
 const inventoryService = require('../inventory/inventory.service');
+const notificationService = require('../notifications/notification.service');
 const { roundDecimals } = require('../../utils/inventoryCosting');
 
 // ─────────────────────────────────────────
@@ -157,7 +158,7 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
 
         // 6. Deduct inventory and calculate COGS snapshot for this order
         // If stock is insufficient, this throws and the whole transaction safely rolls back
-        await inventoryService.deductInventoryForOrder({
+        const deductionResult = await inventoryService.deductInventoryForOrder({
           tx,
           branchId: Number(branchId),
           orderId: createdOrder.id,
@@ -182,10 +183,11 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
           },
         });
 
-        return refreshed;
+        return { refreshed, transitions: deductionResult?.transitions || [] };
       });
 
-      return order;
+      await notificationService.processTransitionsSafely(order.transitions);
+      return order.refreshed;
     } catch (err) {
       if (err.code === 'P2002' && attempt < 5) {
         lastError = err;
@@ -311,25 +313,29 @@ async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId, a
     };
   }
 
-  return prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
+    const transitions = [];
+
     // If transitioning to CANCELLED and inventory was deducted, restore it
     if (newStatus === 'CANCELLED' && order.inventoryDeducted) {
-      await inventoryService.restoreInventoryForOrder({
+      const res = await inventoryService.restoreInventoryForOrder({
         tx,
         orderId: order.id,
         reason: `Status transition to CANCELLED for ${order.orderNumber}`,
         actorUserId,
       });
+      if (res?.transitions?.length) transitions.push(...res.transitions);
     }
 
     // If reopening a cancelled order (CANCELLED -> PENDING), re-deduct inventory
     if (order.status === 'CANCELLED' && newStatus === 'PENDING' && !order.inventoryDeducted) {
-      await inventoryService.deductInventoryForOrder({
+      const res = await inventoryService.deductInventoryForOrder({
         tx,
         branchId: order.branchId,
         orderId: order.id,
         items: order.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, orderItemId: i.id })),
       });
+      if (res?.transitions?.length) transitions.push(...res.transitions);
     }
 
     const updated = await tx.order.update({
@@ -342,8 +348,11 @@ async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId, a
       },
     });
 
-    return updated;
+    return { updated, transitions };
   });
+
+  await notificationService.processTransitionsSafely(txResult.transitions);
+  return txResult.updated;
 }
 
 // ─────────────────────────────────────────
@@ -365,15 +374,17 @@ async function cancelOrder(orderId, { userRole, userBranchId, actorUserId }) {
     throw { statusCode: 400, message: 'Order is already cancelled.' };
   }
 
-  return prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
+    const transitions = [];
     // Atomically restore deducted ingredients if any
     if (order.inventoryDeducted) {
-      await inventoryService.restoreInventoryForOrder({
+      const res = await inventoryService.restoreInventoryForOrder({
         tx,
         orderId: order.id,
         reason: `Order cancelled (${order.orderNumber})`,
         actorUserId,
       });
+      if (res?.transitions?.length) transitions.push(...res.transitions);
     }
 
     const updated = await tx.order.update({
@@ -386,8 +397,11 @@ async function cancelOrder(orderId, { userRole, userBranchId, actorUserId }) {
       },
     });
 
-    return updated;
+    return { updated, transitions };
   });
+
+  await notificationService.processTransitionsSafely(txResult.transitions);
+  return txResult.updated;
 }
 
 // ─────────────────────────────────────────
@@ -471,13 +485,15 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
     await tx.payment.createMany({ data: paymentRows });
 
     // Idempotency: ensure inventory is deducted and COGS is snapshotted
+    let transitions = [];
     if (!order.inventoryDeducted) {
-      await inventoryService.deductInventoryForOrder({
+      const res = await inventoryService.deductInventoryForOrder({
         tx,
         branchId: order.branchId,
         orderId: order.id,
         items: order.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, orderItemId: i.id })),
       });
+      transitions = res?.transitions || [];
     }
 
     const completed = await tx.order.update({
@@ -489,12 +505,14 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
       include: { payments: true, items: true },
     });
 
-    return completed;
+    return { completed, transitions };
   });
 
+  await notificationService.processTransitionsSafely(updatedOrder.transitions);
+
   return {
-    order: updatedOrder,
-    payments: updatedOrder.payments,
+    order: updatedOrder.completed,
+    payments: updatedOrder.completed.payments,
     change: overpayment,
   };
 }

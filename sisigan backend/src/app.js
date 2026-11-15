@@ -15,6 +15,7 @@ const inventoryRoutes = require('./modules/inventory/inventory.routes');
 const expenseRoutes   = require('./modules/expenses/expense.routes');
 const reportRoutes    = require('./modules/reports/report.routes');
 const auditLogRoutes  = require('./modules/auditLogs/auditLog.routes');
+const notificationRoutes = require('./modules/notifications/notification.routes');
 const errorMiddleware = require('./middleware/error.middleware');
 const { getCorsOptions } = require('./config/corsConfig');
 
@@ -101,6 +102,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/expenses',  expenseRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // ── 404 Handler ───────────────────────────────────────
 app.use((req, res) => {

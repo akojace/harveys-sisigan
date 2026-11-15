@@ -24,6 +24,7 @@ model Branch {
   branchMenuItems BranchMenuItem[]
   transfersOut    InventoryTransfer[] @relation("TransferSource")
   transfersIn     InventoryTransfer[] @relation("TransferDest")
+  notifications   Notification[]
 
   @@map("branches")
 }
@@ -45,6 +46,7 @@ model User {
   inventoryAuditLogs InventoryAuditLog[] @relation("InventoryAuditActor")
   expenses  Expense[]
   transfers InventoryTransfer[]
+  notifications Notification[]
 
   @@index([branchId])
   @@map("users")
@@ -217,11 +219,13 @@ model InventoryItem {
   consumptionLabel    String?             @db.VarChar(100)
   dailyDeductionAmount Decimal?           @db.Decimal(12, 3)
   isActive            Boolean             @default(true)
+  alertState          InventoryAlertState @default(NORMAL)
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
   ingredient          Ingredient          @relation(fields: [ingredientId], references: [id])
   branch              Branch              @relation(fields: [branchId], references: [id])
   auditLogs           InventoryAuditLog[]
+  notifications       Notification[]
 
   @@unique([branchId, ingredientId])
   @@index([branchId])
@@ -416,4 +420,95 @@ enum TransferStatus {
   PENDING
   COMPLETED
   CANCELLED
+}
+
+enum InventoryAlertState {
+  NORMAL
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+enum NotificationType {
+  OUT_OF_STOCK
+  LOW_STOCK
+  RESTOCKED
+  ORDER_CREATED
+  ORDER_CANCELLED
+  SYSTEM
+}
+
+enum NotificationSeverity {
+  CRITICAL
+  WARNING
+  INFO
+  RECOVERY
+}
+
+model Notification {
+  id              Int                  @id @default(autoincrement())
+  userId          Int
+  branchId        Int?
+  inventoryItemId Int?
+  orderId         Int?
+  type            NotificationType
+  severity        NotificationSeverity
+  outboxEventId   String?              @db.VarChar(64)
+  title           String               @db.VarChar(150)
+  message         String               @db.VarChar(500)
+  itemName        String?              @db.VarChar(150)
+  branchName      String?              @db.VarChar(100)
+  currentQty      Decimal?             @db.Decimal(12, 3)
+  minThreshold    Decimal?             @db.Decimal(12, 3)
+  unit            InventoryUnit?
+  actionUrl       String?              @db.VarChar(255)
+  isRead          Boolean              @default(false)
+  readAt          DateTime?
+  isResolved      Boolean              @default(false)
+  resolvedAt      DateTime?
+  createdAt       DateTime             @default(now())
+
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch          Branch?              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem?       @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@unique([outboxEventId, userId])
+  @@index([userId, isRead, createdAt])
+  @@index([userId, createdAt])
+  @@index([branchId, type, isResolved])
+  @@index([inventoryItemId, type, isResolved])
+  @@map("notifications")
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model NotificationOutbox {
+  id              Int                 @id @default(autoincrement())
+  eventId         String              @unique @db.VarChar(64)
+  idempotencyKey  String              @unique @db.VarChar(128)
+  inventoryItemId Int
+  branchId        Int
+  targetState     InventoryAlertState
+  eventType       NotificationType
+  newQuantity     Decimal             @db.Decimal(12, 3)
+  minThreshold    Decimal             @db.Decimal(12, 3)
+  itemName        String?             @db.VarChar(150)
+  branchName      String?             @db.VarChar(100)
+  unit            InventoryUnit?
+  status          OutboxStatus        @default(PENDING)
+  attempts        Int                 @default(0)
+  nextRetryAt     DateTime            @default(now())
+  lastError       String?             @db.VarChar(500)
+  processedAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([status, nextRetryAt, createdAt])
+  @@index([inventoryItemId, status])
+  @@index([branchId])
+  @@map("notification_outbox")
 }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import NotificationCenter from './NotificationCenter'
 
 import logo from '../../assets/LOGO/logo.jpg'
 import allorder from '../../assets/ICONS/allorder.png'
@@ -135,7 +136,8 @@ export default function Navbar() {
 
         {/* ── Desktop: owner/sign-out section ────────────── */}
         {!isMobile && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
+            <NotificationCenter />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{
                 width: 38, height: 38, borderRadius: '50%',
@@ -179,20 +181,23 @@ export default function Navbar() {
           </div>
         )}
 
-        {/* ── Mobile: hamburger toggle ────────────────────── */}
+        {/* ── Mobile: notification bell + hamburger toggle ── */}
         {isMobile && (
-          <button
-            onClick={() => setMenuOpen(o => !o)}
-            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-            style={{
-              background: 'rgba(255,255,255,0.14)', border: 'none',
-              width: 42, height: 42, borderRadius: 'var(--radius-md)',
-              color: '#fff', fontSize: 20, cursor: 'pointer', flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            {menuOpen ? '✕' : '☰'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <NotificationCenter />
+            <button
+              onClick={() => setMenuOpen(o => !o)}
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              style={{
+                background: 'rgba(255,255,255,0.14)', border: 'none',
+                width: 42, height: 42, borderRadius: 'var(--radius-md)',
+                color: '#fff', fontSize: 20, cursor: 'pointer', flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              {menuOpen ? '✕' : '☰'}
+            </button>
+          </div>
         )}
       </div>
 

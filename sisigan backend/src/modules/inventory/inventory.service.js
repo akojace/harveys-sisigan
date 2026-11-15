@@ -9,6 +9,7 @@ const {
   roundDecimals,
 } = require('../../utils/inventoryCosting');
 const { validateBranchAccess } = require('../../middleware/branchScope.middleware');
+const notificationService = require('../notifications/notification.service');
 
 function getScopedBranchId(requestingUser, branchId) {
   return validateBranchAccess(requestingUser, branchId);
@@ -221,25 +222,39 @@ async function restockInventoryItem(payload, requestingUser) {
       },
     });
 
+    const transition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: updated.id,
+      branchId: updated.branchId,
+      newQuantity: nextQty,
+      minThreshold: updated.minThreshold,
+      itemName: updated.ingredient?.name,
+      branchName: updated.branch?.name,
+      unit: updated.ingredient?.unit,
+    });
+
     return {
-      ...updated,
-      restockSummary: {
-        purchasedQuantity: pQty,
-        purchasedUnit: sourceUnit,
-        usableQuantityAdded: weightedCalc.usablePurchaseQuantity,
-        inventoryUnit: baseUnit,
-        purchaseCost: pCost,
-        yieldPercentage: yieldPct,
-        previousQuantity: currentQty,
-        newQuantity: nextQty,
-        previousUnitCost: currentPrice,
-        newAverageUnitCost: nextAvgCost,
-        totalInventoryValue: roundDecimals(nextQty * nextAvgCost, 2),
+      data: {
+        ...updated,
+        restockSummary: {
+          purchasedQuantity: pQty,
+          purchasedUnit: sourceUnit,
+          usableQuantityAdded: weightedCalc.usablePurchaseQuantity,
+          inventoryUnit: baseUnit,
+          purchaseCost: pCost,
+          yieldPercentage: yieldPct,
+          previousQuantity: currentQty,
+          newQuantity: nextQty,
+          previousUnitCost: currentPrice,
+          newAverageUnitCost: nextAvgCost,
+          totalInventoryValue: roundDecimals(nextQty * nextAvgCost, 2),
+        },
       },
+      transition,
     };
   });
 
-  return result;
+  await notificationService.processTransitionsSafely([result.transition]);
+  return result.data;
 }
 
 /**
@@ -302,13 +317,25 @@ async function adjustInventoryItem(itemId, { newQuantity, actionType = 'MANUAL_E
       },
     });
 
-    return row;
+    const transition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: row.id,
+      branchId: row.branchId,
+      newQuantity: nextQty,
+      minThreshold: row.minThreshold,
+      itemName: row.ingredient?.name,
+      branchName: row.branch?.name,
+      unit: row.ingredient?.unit,
+    });
+
+    return { row, transition };
   });
 
+  await notificationService.processTransitionsSafely([updated.transition]);
+
   return {
-    ...updated,
-    lowStock: Number(updated.quantity) <= Number(updated.minThreshold),
-    outOfStock: Number(updated.quantity) <= 0,
+    ...updated.row,
+    lowStock: Number(updated.row.quantity) <= Number(updated.row.minThreshold),
+    outOfStock: Number(updated.row.quantity) <= 0,
   };
 }
 
@@ -392,13 +419,25 @@ async function updateIngredientDetails(itemId, payload, requestingUser) {
       },
     });
 
-    return row;
+    const transition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: row.id,
+      branchId: row.branchId,
+      newQuantity: Number(row.quantity),
+      minThreshold: row.minThreshold,
+      itemName: row.ingredient?.name,
+      branchName: row.branch?.name,
+      unit: row.ingredient?.unit,
+    });
+
+    return { row, transition };
   });
 
+  await notificationService.processTransitionsSafely([updated.transition]);
+
   return {
-    ...updated,
-    lowStock: Number(updated.quantity) <= Number(updated.minThreshold),
-    outOfStock: Number(updated.quantity) <= 0,
+    ...updated.row,
+    lowStock: Number(updated.row.quantity) <= Number(updated.row.minThreshold),
+    outOfStock: Number(updated.row.quantity) <= 0,
   };
 }
 
@@ -714,7 +753,8 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
   const orderNumber = orderRecord?.orderNumber || `ID#${orderId}`;
 
   // Execute atomic stock deductions and audit logs
-  for (const [ingredientId, { total: deduction, unitCost }] of requiredByIngredient.entries()) {
+  const transitions = [];
+  for (const [ingredientId, { total: deduction, unitCost, name, baseUnit }] of requiredByIngredient.entries()) {
     const row = inventoryByIngredient.get(ingredientId);
     const before = Number(row.quantity);
     const after = roundDecimals(before - deduction, 3);
@@ -739,6 +779,16 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
         note: `Auto-deducted for order ${orderNumber}`,
       },
     });
+
+    const transition = await notificationService.evaluateAndClaimTransition(db, {
+      inventoryItemId: row.id,
+      branchId: Number(branchId),
+      newQuantity: after,
+      minThreshold: row.minThreshold,
+      itemName: name,
+      unit: baseUnit,
+    });
+    if (transition) transitions.push(transition);
   }
 
   // Update snapshot COGS on OrderItems and Order
@@ -775,9 +825,14 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
     },
   });
 
+  if (!tx) {
+    await notificationService.processTransitionsSafely(transitions);
+  }
+
   return {
     totalOrderCogs: roundDecimals(totalOrderCogs, 2),
     itemCogs: itemCogsList,
+    transitions,
   };
 }
 
@@ -850,6 +905,7 @@ async function restoreInventoryForOrder({ tx, orderId, reason = 'Order cancelled
   }
 
   // Restore inventory items
+  const transitions = [];
   for (const [ingredientId, { total: restoreQty }] of restoreMap.entries()) {
     const inventoryItem = await db.inventoryItem.findUnique({
       where: {
@@ -857,6 +913,10 @@ async function restoreInventoryForOrder({ tx, orderId, reason = 'Order cancelled
           branchId: order.branchId,
           ingredientId,
         },
+      },
+      include: {
+        ingredient: { select: { name: true, unit: true } },
+        branch: { select: { name: true } },
       },
     });
 
@@ -887,6 +947,17 @@ async function restoreInventoryForOrder({ tx, orderId, reason = 'Order cancelled
         actorUserId: actorUserId || null,
       },
     });
+
+    const transition = await notificationService.evaluateAndClaimTransition(db, {
+      inventoryItemId: inventoryItem.id,
+      branchId: order.branchId,
+      newQuantity: after,
+      minThreshold: inventoryItem.minThreshold,
+      itemName: inventoryItem.ingredient?.name,
+      branchName: inventoryItem.branch?.name,
+      unit: inventoryItem.ingredient?.unit,
+    });
+    if (transition) transitions.push(transition);
   }
 
   // Update order flag
@@ -897,10 +968,15 @@ async function restoreInventoryForOrder({ tx, orderId, reason = 'Order cancelled
     },
   });
 
+  if (!tx) {
+    await notificationService.processTransitionsSafely(transitions);
+  }
+
   return {
     restored: true,
     orderNumber: order.orderNumber,
     itemsRestored: restoreMap.size,
+    transitions,
   };
 }
 
@@ -947,12 +1023,12 @@ async function runDailyDeduction() {
     const unitCost = Number(item.price) || 0;
     const totalCost = roundDecimals((before - after) * unitCost, 2);
 
-    await prisma.$transaction([
-      prisma.inventoryItem.update({
+    const transition = await prisma.$transaction(async (tx) => {
+      await tx.inventoryItem.update({
         where: { id: item.id },
         data: { quantity: after },
-      }),
-      prisma.inventoryAuditLog.create({
+      });
+      await tx.inventoryAuditLog.create({
         data: {
           inventoryItemId: item.id,
           actionType: 'DAILY_DEDUCTION',
@@ -963,9 +1039,16 @@ async function runDailyDeduction() {
           totalCost: totalCost > 0 ? totalCost : null,
           note: 'Daily scheduled deduction',
         },
-      }),
-    ]);
+      });
+      return notificationService.evaluateAndClaimTransition(tx, {
+        inventoryItemId: item.id,
+        branchId: item.branchId,
+        newQuantity: after,
+        minThreshold: item.minThreshold,
+      });
+    });
 
+    await notificationService.processTransitionsSafely([transition]);
     processed++;
   }
 
@@ -1229,10 +1312,31 @@ async function transferInventory(payload, requestingUser) {
       },
     });
 
-    return transfer;
+    const sourceTransition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: sourceItem.id,
+      branchId: sBranchId,
+      newQuantity: newSourceQty,
+      minThreshold: sourceItem.minThreshold,
+      itemName: transfer.ingredient?.name,
+      branchName: transfer.sourceBranch?.name,
+      unit: transfer.ingredient?.unit,
+    });
+
+    const destTransition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: targetDestItem.id,
+      branchId: dBranchId,
+      newQuantity: newDestQty,
+      minThreshold: targetDestItem.minThreshold,
+      itemName: transfer.ingredient?.name,
+      branchName: transfer.destBranch?.name,
+      unit: transfer.ingredient?.unit,
+    });
+
+    return { transfer, transitions: [sourceTransition, destTransition] };
   });
 
-  return result;
+  await notificationService.processTransitionsSafely(result.transitions);
+  return result.transfer;
 }
 
 async function getTransfers({ branchId, status, limit = 50 }, requestingUser) {
@@ -1259,6 +1363,145 @@ async function getTransfers({ branchId, status, limit = 50 }, requestingUser) {
   });
 }
 
+async function inspectInventoryDependencies(db, inventoryItemId, requestingUser, expectedBranchId) {
+  const itemId = Number(inventoryItemId);
+  if (!Number.isInteger(itemId) || itemId < 1) {
+    throw { statusCode: 400, message: 'Invalid inventory item ID.' };
+  }
+
+  const item = await db.inventoryItem.findUnique({
+    where: { id: itemId },
+    include: {
+      branch: { select: { id: true, name: true } },
+      ingredient: {
+        select: {
+          id: true,
+          name: true,
+          unit: true,
+          _count: { select: { recipes: true } },
+        },
+      },
+    },
+  });
+
+  if (!item) {
+    throw { statusCode: 404, message: 'Inventory item not found.' };
+  }
+
+  getScopedBranchId(requestingUser, item.branchId);
+
+  if (
+    expectedBranchId !== undefined &&
+    expectedBranchId !== null &&
+    expectedBranchId !== '' &&
+    Number(expectedBranchId) !== item.branchId
+  ) {
+    throw {
+      statusCode: 403,
+      message: 'Cannot access or delete inventory belonging to another branch.',
+    };
+  }
+
+  const [orderLinkedAuditLogs, movementAuditLogs, totalAuditLogs, transfers] = await Promise.all([
+    db.inventoryAuditLog.count({
+      where: { inventoryItemId: item.id, orderId: { not: null } },
+    }),
+    db.inventoryAuditLog.count({
+      where: {
+        inventoryItemId: item.id,
+        actionType: {
+          in: [
+            'ORDER_DEDUCTION',
+            'ORDER_RESTORE',
+            'RESTOCK',
+            'WASTAGE',
+            'TRANSFER_IN',
+            'TRANSFER_OUT',
+            'DAILY_DEDUCTION',
+          ],
+        },
+      },
+    }),
+    db.inventoryAuditLog.count({ where: { inventoryItemId: item.id } }),
+    db.inventoryTransfer.count({
+      where: {
+        ingredientId: item.ingredientId,
+        OR: [{ sourceBranchId: item.branchId }, { destBranchId: item.branchId }],
+      },
+    }),
+  ]);
+
+  const blockers = [];
+  if (orderLinkedAuditLogs > 0) {
+    blockers.push(`${orderLinkedAuditLogs} order-linked audit log(s)`);
+  }
+  if (movementAuditLogs > 0) {
+    blockers.push(`${movementAuditLogs} historical stock movement log(s)`);
+  }
+  if (transfers > 0) {
+    blockers.push(`${transfers} inter-branch transfer record(s)`);
+  }
+
+  return {
+    item: {
+      id: item.id,
+      branchId: item.branchId,
+      branchName: item.branch?.name || `Branch #${item.branchId}`,
+      ingredientId: item.ingredientId,
+      ingredientName: item.ingredient?.name || 'Ingredient',
+      quantity: Number(item.quantity),
+      unit: item.ingredient?.unit,
+    },
+    canDelete: blockers.length === 0,
+    blockers,
+    counts: {
+      orderLinkedAuditLogs,
+      movementAuditLogs,
+      totalAuditLogs,
+      transfers,
+      recipeCount: item.ingredient?._count?.recipes || 0,
+    },
+  };
+}
+
+async function getInventoryItemDependencies(id, requestingUser, expectedBranchId) {
+  return inspectInventoryDependencies(prisma, id, requestingUser, expectedBranchId);
+}
+
+async function deleteInventoryItem(id, requestingUser, { branchId } = {}) {
+  if (!requestingUser || requestingUser.role !== 'OWNER') {
+    throw { statusCode: 403, message: 'Only OWNER accounts can permanently delete inventory items.' };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const deps = await inspectInventoryDependencies(tx, id, requestingUser, branchId);
+    if (!deps.canDelete) {
+      throw {
+        statusCode: 409,
+        message: `Cannot delete "${deps.item.ingredientName}" from ${deps.item.branchName} because historical records exist: ${deps.blockers.join('; ')}.`,
+        details: deps,
+      };
+    }
+
+    try {
+      await tx.notification.deleteMany({ where: { inventoryItemId: deps.item.id } });
+    } catch (err) {
+      if (err?.code !== 'P2021') throw err;
+    }
+
+    await tx.inventoryAuditLog.deleteMany({ where: { inventoryItemId: deps.item.id } });
+    await tx.inventoryItem.delete({ where: { id: deps.item.id } });
+
+    return {
+      deletedInventoryItemId: deps.item.id,
+      branchId: deps.item.branchId,
+      branchName: deps.item.branchName,
+      ingredientId: deps.item.ingredientId,
+      ingredientName: deps.item.ingredientName,
+    };
+  });
+}
+
 module.exports = {
   getInventory,
   createInventoryItem,
@@ -1273,4 +1516,6 @@ module.exports = {
   getAuditLogs,
   transferInventory,
   getTransfers,
+  getInventoryItemDependencies,
+  deleteInventoryItem,
 };

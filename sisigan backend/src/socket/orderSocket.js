@@ -3,7 +3,14 @@
 
 const jwt = require('jsonwebtoken');
 
+let ioInstance = null;
+
+function getIO() {
+  return ioInstance;
+}
+
 function initSocket(io) {
+  ioInstance = io;
   // Authenticate socket connections via JWT query param
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -25,6 +32,8 @@ function initSocket(io) {
 
     // Join branch-specific room for scoped broadcasts
     socket.join(`branch_${branchId}`);
+    // Join user-specific room for targeted notifications
+    socket.join(`user_${id}`);
 
     // OWNER joins all branches
     if (role === 'OWNER') socket.join('admin_room');
@@ -43,4 +52,4 @@ function initSocket(io) {
   return io;
 }
 
-module.exports = { initSocket };
+module.exports = { initSocket, getIO };

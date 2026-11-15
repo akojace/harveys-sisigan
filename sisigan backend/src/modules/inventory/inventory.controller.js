@@ -133,6 +133,34 @@ async function getTransfers(req, res, next) {
   }
 }
 
+async function getInventoryDependencies(req, res, next) {
+  try {
+    const { branchId } = req.query;
+    const data = await inventoryService.getInventoryItemDependencies(
+      req.params.id,
+      req.user,
+      branchId
+    );
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteInventory(req, res, next) {
+  try {
+    const branchId = req.query.branchId ?? req.body?.branchId;
+    const data = await inventoryService.deleteInventoryItem(
+      req.params.id,
+      req.user,
+      { branchId }
+    );
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getInventory,
   patchInventory,
@@ -142,4 +170,6 @@ module.exports = {
   adjustInventory,
   transferStock,
   getTransfers,
+  getInventoryDependencies,
+  deleteInventory,
 };

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { inventoryApi, reportsApi, dashboardApi } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -489,13 +490,95 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
   )
 }
 
+function DeleteInventoryModal({ item, branchFilterId, onClose, onDeleted }) {
+  const [deps, setDeps] = useState(null)
+  const [loadingDeps, setLoadingDeps] = useState(true)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+  const scopedBranchId = branchFilterId || item.branchId
+
+  useEffect(() => {
+    let active = true
+    setLoadingDeps(true)
+    setError('')
+    inventoryApi.dependencies(item.id, scopedBranchId)
+      .then((res) => { if (active) setDeps(res.data) })
+      .catch((e) => { if (active) setError(e.message) })
+      .finally(() => { if (active) setLoadingDeps(false) })
+    return () => { active = false }
+  }, [item.id, scopedBranchId])
+
+  async function confirmDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await inventoryApi.remove(item.id, scopedBranchId)
+      onDeleted(item)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title="🗑️ Delete Branch Inventory Item" onClose={onClose} width={480}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <p style={{ fontSize: 14, color: 'var(--text-mid)', lineHeight: 1.5 }}>
+          Remove <strong style={{ color: 'var(--brown-800)' }}>{item.ingredient?.name}</strong> from{' '}
+          <strong style={{ color: 'var(--brown-800)' }}>{item.branch?.name}</strong>?
+        </p>
+
+        {loadingDeps ? (
+          <div style={{ padding: 14, textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
+            Checking audit logs &amp; stock movement history…
+          </div>
+        ) : deps ? (
+          deps.canDelete ? (
+            <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: 13, color: '#9a3412' }}>
+              <strong>Safe to delete.</strong> No order-linked deductions, restocks, wastage, or transfers exist for this branch item.
+              <div style={{ marginTop: 6, color: 'var(--text-mid)' }}>
+                Shared ingredient, menu recipes ({deps.counts.recipeCount}), and other branches&apos; inventory will be preserved.
+              </div>
+            </div>
+          ) : (
+            <div style={{ background: 'var(--red-light)', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: 13, color: 'var(--red-dark)' }}>
+              <strong>Deletion blocked — historical audit records must be preserved:</strong>
+              <ul style={{ margin: '8px 0 0 18px', padding: 0, lineHeight: 1.6 }}>
+                {deps.blockers.map((b) => <li key={b}>{b}</li>)}
+              </ul>
+            </div>
+          )
+        ) : null}
+
+        {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+          <Button variant="outline" fullWidth onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            fullWidth
+            disabled={loadingDeps || deleting || !deps?.canDelete}
+            onClick={confirmDelete}
+            style={{ background: deps?.canDelete ? 'var(--red)' : undefined, borderColor: deps?.canDelete ? 'var(--red)' : undefined }}
+          >
+            {deleting ? 'Deleting…' : 'Confirm Delete'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export default function InventoryPage() {
   const { user } = useAuth()
   const isOwner = user?.role === 'OWNER'
   const isMobile = useIsMobile()
+  const [searchParams] = useSearchParams()
+  const highlightedItemId = searchParams.get('itemId') ? Number(searchParams.get('itemId')) : null
 
   const [loading, setLoading] = useState(true)
-  const [branchId, setBranchId] = useState('')
+  const [branchId, setBranchId] = useState(() => (isOwner ? (searchParams.get('branchId') || '') : ''))
   const [branches, setBranches] = useState([])
   const [inventory, setInventory] = useState([])
   const [report, setReport] = useState(null)
@@ -504,10 +587,16 @@ export default function InventoryPage() {
   const [showTransfer, setShowTransfer] = useState(false)
   // ADDED — currently-open edit modal's item, or null
   const [editItem, setEditItem] = useState(null)
+  const [deleteItem, setDeleteItem] = useState(null)
+  const [notice, setNotice] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
-    dashboardApi.branches().then((d) => setBranches(d.data || []))
+    dashboardApi.branches().then((d) => {
+      const list = d.data || []
+      setBranches(list)
+      setBranchId((prev) => (prev && !list.some((b) => String(b.id) === String(prev)) ? '' : prev))
+    })
   }, [])
 
   const load = useCallback(async () => {
@@ -611,6 +700,12 @@ export default function InventoryPage() {
       </div>
 
       {error && <div style={{ background: 'var(--red-light)', color: 'var(--red-dark)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 16 }}>{error}</div>}
+      {notice && (
+        <div style={{ background: 'var(--green-light)', color: 'var(--green-dark)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 600, fontSize: 13.5 }}>
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, color: 'inherit' }}>✕</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
         <StatCard label="Inventory Items" value={inventory.length} />
@@ -654,8 +749,15 @@ export default function InventoryPage() {
                 <tbody>
                   {filteredInventory.map((item, idx) => {
                     const low = Number(item.quantity) <= Number(item.minThreshold)
+                    const isHighlighted = highlightedItemId === item.id
                     return (
-                      <tr key={item.id} style={{ borderBottom: idx < filteredInventory.length - 1 ? '1px solid var(--border-light)' : 'none' }}>
+                      <tr
+                        key={item.id}
+                        style={{
+                          borderBottom: idx < filteredInventory.length - 1 ? '1px solid var(--border-light)' : 'none',
+                          background: isHighlighted ? '#fef3c7' : undefined,
+                        }}
+                      >
                         <td style={{ padding: '9px 12px', fontWeight: 600 }}>{item.ingredient?.name}</td>
                         <td style={{ padding: '9px 12px', color: 'var(--text-mid)' }}>{item.ingredient?.category}</td>
                         <td style={{ padding: '9px 12px' }}>{Number(item.quantity).toFixed(3)} {item.ingredient?.unit}</td>
@@ -668,13 +770,22 @@ export default function InventoryPage() {
                           </span>
                         </td>
                         {/* ADDED — Edit button, opens EditIngredientModal pre-filled with this row */}
-                        <td style={{ padding: '9px 12px' }}>
+                        <td style={{ padding: '9px 12px', display: 'flex', gap: 6 }}>
                           <button
                             onClick={() => setEditItem(item)}
                             style={{ padding: '6px 12px', border: '1.5px solid var(--brown-300)', borderRadius: 'var(--radius-sm)', background: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', color: 'var(--brown-700)', whiteSpace: 'nowrap' }}
                           >
                             ✏️ Edit
                           </button>
+                          {isOwner && (
+                            <button
+                              onClick={() => setDeleteItem(item)}
+                              style={{ padding: '6px 10px', border: '1.5px solid var(--red-light)', borderRadius: 'var(--radius-sm)', background: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', color: 'var(--red)', whiteSpace: 'nowrap' }}
+                              title="Delete branch inventory item"
+                            >
+                              🗑️ Delete
+                            </button>
+                          )}
                         </td>
                       </tr>
                     )
@@ -760,6 +871,19 @@ export default function InventoryPage() {
           inventory={inventory}
           onClose={() => setShowTransfer(false)}
           onSaved={async () => { setShowTransfer(false); await load() }}
+        />
+      )}
+
+      {deleteItem && (
+        <DeleteInventoryModal
+          item={deleteItem}
+          branchFilterId={branchId}
+          onClose={() => setDeleteItem(null)}
+          onDeleted={async (removed) => {
+            setDeleteItem(null)
+            setNotice(`Removed "${removed.ingredient?.name}" from ${removed.branch?.name}.`)
+            await load()
+          }}
         />
       )}
     </div>

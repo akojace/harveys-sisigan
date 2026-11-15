@@ -14,6 +14,10 @@ const prisma = require('./src/config/db');
 const { getSocketCorsOptions } = require('./src/config/corsConfig');
 const { initSocket } = require('./src/socket/orderSocket');
 const { startInventoryDailyDeductionJob } = require('./src/jobs/inventory.cron');
+const {
+  startNotificationOutboxWorker,
+  stopNotificationOutboxWorker,
+} = require('./src/jobs/notificationOutbox.worker');
 
 const PORT = process.env.PORT || 3000;
 
@@ -30,6 +34,7 @@ app.set('io', io);
 // Initialize socket event handlers
 initSocket(io);
 startInventoryDailyDeductionJob();
+startNotificationOutboxWorker();
 
 // ── Start Server ──────────────────────────────────────
 httpServer.listen(PORT, async () => {
@@ -61,6 +66,8 @@ httpServer.listen(PORT, async () => {
 // ── Graceful Shutdown ─────────────────────────────────
 async function shutdown(signal) {
   console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
+
+  stopNotificationOutboxWorker();
 
   // Close HTTP and WebSocket server
   httpServer.close(() => {

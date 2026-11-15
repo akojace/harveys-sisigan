@@ -107,4 +107,10 @@ router.post(
 // GET /api/inventory/transfers — List cross-branch transfers
 router.get('/transfers', inventoryController.getTransfers);
 
+// GET /api/inventory/:id/dependencies — Inspect dependent audit/transfer records before deletion
+router.get('/:id/dependencies', inventoryController.getInventoryDependencies);
+
+// DELETE /api/inventory/:id — Permanently delete branch inventory item (OWNER only, if no historical logs)
+router.delete('/:id', roleMiddleware('OWNER'), inventoryController.deleteInventory);
+
 module.exports = router;

@@ -71,19 +71,172 @@ function BranchModal({ editBranch, onClose, onSaved }) {
   )
 }
 
+// ─── DELETE BRANCH MODAL ──────────────────────────────────
+function DeleteBranchModal({ branch, onClose, onDeleted }) {
+  const [deps, setDeps] = useState(null)
+  const [loadingDeps, setLoadingDeps] = useState(true)
+  const [reassignBranchId, setReassignBranchId] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    setLoadingDeps(true)
+    setError('')
+    setConfirmed(false)
+    setReassignBranchId('')
+    branchesApi.dependencies(branch.id)
+      .then((res) => {
+        if (!active) return
+        setDeps(res.data)
+        if (res.data?.otherBranches?.length === 1) {
+          setReassignBranchId(String(res.data.otherBranches[0].id))
+        }
+      })
+      .catch((e) => { if (active) setError(e.message) })
+      .finally(() => { if (active) setLoadingDeps(false) })
+    return () => { active = false }
+  }, [branch.id])
+
+  const needsOwnerReassign = (deps?.ownersToReassign?.length || 0) > 0
+  const canConfirm =
+    !loadingDeps &&
+    !deleting &&
+    !!deps &&
+    !deps.isFinalBranch &&
+    confirmed &&
+    (!needsOwnerReassign || Boolean(reassignBranchId))
+
+  async function confirmDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      const res = await branchesApi.remove(branch.id, reassignBranchId ? Number(reassignBranchId) : undefined)
+      onDeleted(res)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const c = deps?.previewCounts || {}
+
+  return (
+    <Modal title={`Permanently delete ${branch.name}?`} onClose={onClose} width={520}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: 13.5, color: 'var(--red-dark)', lineHeight: 1.5 }}>
+          <strong>Warning:</strong> All records exclusively belonging to <strong>{branch.name}</strong> will be permanently deleted, including sales history, payments, employee accounts, inventory, expenses, transfers, and audit records.
+          <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-mid)' }}>
+            Shared ingredients, recipes, menu items, OWNER accounts, and other branches&apos; records will be preserved.
+          </div>
+        </div>
+
+        {loadingDeps ? (
+          <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
+            Inspecting branch records…
+          </div>
+        ) : deps ? (
+          deps.isFinalBranch ? (
+            <div style={{ background: 'var(--red-light)', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: 13, color: 'var(--red-dark)' }}>
+              <strong>Cannot delete the final remaining branch.</strong> At least one branch must remain active in the system.
+            </div>
+          ) : (
+            <>
+              <div style={{ background: 'var(--brown-50)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '12px 14px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--brown-800)', marginBottom: 8 }}>
+                  Deletion Preview
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px 14px', fontSize: 13, color: 'var(--text-mid)' }}>
+                  <div>Employees: <strong>{c.employees ?? 0}</strong></div>
+                  <div>Orders: <strong>{c.orders ?? 0}</strong></div>
+                  <div>Order Items: <strong>{c.orderItems ?? 0}</strong></div>
+                  <div>Payments: <strong>{c.payments ?? 0}</strong></div>
+                  <div>Inventory Items: <strong>{c.inventoryItems ?? 0}</strong></div>
+                  <div>Audit Logs: <strong>{c.inventoryAuditLogs ?? 0}</strong></div>
+                  <div>Expenses: <strong>{c.expenses ?? 0}</strong></div>
+                  <div>Transfers: <strong>{c.inventoryTransfers ?? 0}</strong></div>
+                  <div>Menu Links: <strong>{c.branchMenuItems ?? 0}</strong></div>
+                  <div>Auth Logs: <strong>{c.authLogs ?? 0}</strong></div>
+                  <div>Notifications: <strong>{c.notifications ?? 0}</strong></div>
+                </div>
+              </div>
+
+              {needsOwnerReassign && (
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: 13, color: '#9a3412' }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    OWNER Account Reassignment Required ({deps.ownersToReassign.length})
+                  </div>
+                  <div style={{ marginBottom: 8, fontSize: 12.5 }}>
+                    Protected OWNER account(s) ({deps.ownersToReassign.map((o) => o.name).join(', ')}) are currently assigned to {branch.name} and will never be deleted. Select a surviving branch to reassign them to:
+                  </div>
+                  <select
+                    value={reassignBranchId}
+                    onChange={(e) => setReassignBranchId(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #fdba74', borderRadius: 'var(--radius-md)', background: '#fff', fontSize: 13.5 }}
+                  >
+                    <option value="">Select destination branch…</option>
+                    {deps.otherBranches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.city}){b.isActive ? '' : ' [Inactive]'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--text-mid)', cursor: 'pointer', padding: '4px 2px' }}>
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmed(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  I understand that this action permanently deletes <strong>{branch.name}</strong> and all of its branch-specific records above.
+                </span>
+              </label>
+            </>
+          )
+        ) : null}
+
+        {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+          <Button variant="outline" fullWidth onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            fullWidth
+            disabled={!canConfirm}
+            onClick={confirmDelete}
+            style={{ background: canConfirm ? 'var(--red)' : undefined, borderColor: canConfirm ? 'var(--red)' : undefined }}
+          >
+            {deleting ? 'Deleting…' : 'Permanently Delete Branch'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── BRANCHES PAGE ────────────────────────────────────────
 export default function BranchesPage() {
-  const [branches,   setBranches]   = useState([])
-  const [loading,    setLoading]    = useState(true)
-  const [showCreate, setShowCreate] = useState(false)
-  const [editBranch, setEditBranch] = useState(null)
-  const [toggling,   setToggling]   = useState(null)
+  const [branches,     setBranches]     = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [showCreate,   setShowCreate]   = useState(false)
+  const [editBranch,   setEditBranch]   = useState(null)
+  const [deleteBranch, setDeleteBranch] = useState(null)
+  const [toggling,     setToggling]     = useState(null)
+  const [notice,       setNotice]       = useState(null)
 
   async function load() {
     setLoading(true)
     try {
       const data = await branchesApi.list()
       setBranches(data.data || [])
+    } catch (e) {
+      setNotice({ type: 'error', text: e.message })
     } finally { setLoading(false) }
   }
 
@@ -113,6 +266,24 @@ export default function BranchesPage() {
         </div>
         <Button variant="primary" onClick={() => setShowCreate(true)}>+ New Branch</Button>
       </div>
+
+      {notice && (
+        <div style={{
+          marginBottom: 18,
+          padding: '12px 16px',
+          borderRadius: 'var(--radius-md)',
+          background: notice.type === 'error' ? 'var(--red-light)' : 'var(--green-light)',
+          color: notice.type === 'error' ? 'var(--red-dark)' : 'var(--green-dark)',
+          fontSize: 13.5,
+          fontWeight: 600,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span>{notice.text}</span>
+          <button onClick={() => setNotice(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, color: 'inherit' }}>✕</button>
+        </div>
+      )}
 
       {/* Stats row */}
       <div style={{
@@ -242,6 +413,15 @@ export default function BranchesPage() {
                 >
                   {toggling === branch.id ? '…' : branch.isActive ? '🚫' : '✅'}
                 </button>
+                <button
+                  onClick={() => setDeleteBranch(branch)}
+                  style={{ ...actionBtn, color: 'var(--red)' }}
+                  title="Delete branch"
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--red-light)'; e.currentTarget.style.borderColor = 'var(--red)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                >
+                  🗑️
+                </button>
               </div>
             </div>
           ))}
@@ -251,7 +431,7 @@ export default function BranchesPage() {
       {showCreate && (
         <BranchModal
           onClose={() => setShowCreate(false)}
-          onSaved={() => { setShowCreate(false); load() }}
+          onSaved={() => { setShowCreate(false); setNotice({ type: 'success', text: 'Branch created successfully.' }); load() }}
         />
       )}
 
@@ -259,7 +439,23 @@ export default function BranchesPage() {
         <BranchModal
           editBranch={editBranch}
           onClose={() => setEditBranch(null)}
-          onSaved={() => { setEditBranch(null); load() }}
+          onSaved={() => { setEditBranch(null); setNotice({ type: 'success', text: 'Branch updated successfully.' }); load() }}
+        />
+      )}
+
+      {deleteBranch && (
+        <DeleteBranchModal
+          branch={deleteBranch}
+          onClose={() => setDeleteBranch(null)}
+          onDeleted={(res) => {
+            const r = res?.deletedRecords || {}
+            setDeleteBranch(null)
+            setNotice({
+              type: 'success',
+              text: `Permanently deleted "${res?.deletedBranch || deleteBranch.name}" (removed ${r.orders ?? 0} orders, ${r.payments ?? 0} payments, ${r.employees ?? 0} employees, ${r.inventoryItems ?? 0} inventory items).`,
+            })
+            load()
+          }}
         />
       )}
     </div>
