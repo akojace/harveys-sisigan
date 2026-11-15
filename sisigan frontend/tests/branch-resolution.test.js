@@ -56,4 +56,40 @@ describe('Frontend Branch ID Resolution & Isolation', () => {
     const legacyUser = { id: 17, role: 'MANAGER', branchId: 4 }
     assert.equal(getUserBranchId(legacyUser), 4)
   })
+
+  it('9. OWNER with stale deleted branchId=1 automatically validates and selects assigned surviving branch #2 or active branch', () => {
+    const ownerAssignedToLumban = { id: 1, role: 'OWNER', branch: { id: 2, name: 'Lumban' } }
+    const activeBranches = [
+      { id: 2, name: 'Lumban Branch', isActive: true },
+      { id: 3, name: 'Pagsanjan Branch', isActive: true },
+    ]
+    // Even if selectedBranchId was stale Paete (1), it validates against activeBranches and falls back to home branch 2
+    const resolved = resolveBranchId({
+      isOwner: true,
+      selectedBranchId: 1,
+      user: ownerAssignedToLumban,
+      branches: activeBranches,
+    })
+    assert.equal(resolved, 2)
+
+    // If home branch is not in activeBranches, falls back to first active branch (e.g. 3)
+    const resolvedFallback = resolveBranchId({
+      isOwner: true,
+      selectedBranchId: 1,
+      user: { id: 1, role: 'OWNER', branch: { id: 99, name: 'Nonexistent' } },
+      branches: [{ id: 3, name: 'Pagsanjan Branch', isActive: true }],
+    })
+    assert.equal(resolvedFallback, 3)
+  })
+
+  it('10. Non-OWNER always uses authenticated branch #2 even if stale branchId=1 is sent in state', () => {
+    const cashier = { id: 20, role: 'CASHIER', branchId: 2, branch: { id: 2, name: 'Lumban' } }
+    const resolved = resolveBranchId({
+      isOwner: false,
+      selectedBranchId: 1,
+      user: cashier,
+      branches: [{ id: 1, name: 'Paete' }, { id: 2, name: 'Lumban' }],
+    })
+    assert.equal(resolved, 2)
+  })
 })

@@ -1740,7 +1740,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (isOwner) {
-      dashboardApi.branches().then(d => setBranches(d.data || []))
+      dashboardApi.branches().then(d => {
+        const list = d.data || []
+        setBranches(list)
+        setBranchId(prev => (prev && !list.some(b => String(b.id) === String(prev)) ? '' : prev))
+      })
     }
   }, [isOwner])
 

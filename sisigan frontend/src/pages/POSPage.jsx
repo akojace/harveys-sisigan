@@ -548,8 +548,16 @@ export default function POSPage() {
       branchesApi.list().then(res => {
         const list = (res.data || []).filter(b => b.isActive)
         setBranches(list)
-        if (list.length && (!selectedBranchId || !list.find(b => b.id === Number(selectedBranchId)))) {
-          setSelectedBranchId(list[0].id)
+        if (list.length) {
+          setSelectedBranchId(prev => {
+            if (prev != null && list.some(b => b.id === Number(prev))) {
+              return Number(prev)
+            }
+            if (userBranchId != null && list.some(b => b.id === Number(userBranchId))) {
+              return Number(userBranchId)
+            }
+            return list[0].id
+          })
         }
       }).catch(() => {})
     } else {
@@ -557,7 +565,7 @@ export default function POSPage() {
     }
   }, [isOwner, userBranchId])
 
-  const branchId = resolveBranchId({ isOwner, selectedBranchId, user })
+  const branchId = resolveBranchId({ isOwner, selectedBranchId, user, branches })
 
   // ADDED — shows a floating toast for ~1.6s. Purely presentational.
   function showToast(message) {
@@ -1048,7 +1056,7 @@ export default function POSPage() {
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 8, flexShrink: 0 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--brown-800)' }}>📍 Branch:</span>
               <select
-                value={selectedBranchId}
+                value={selectedBranchId ?? branchId ?? ''}
                 onChange={e => setSelectedBranchId(Number(e.target.value))}
                 style={{
                   height: 44,

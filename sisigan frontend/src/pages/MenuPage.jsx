@@ -807,15 +807,23 @@ export default function MenuPage() {
   const [search,     setSearch]    = useState('')
 
   const canEdit = isOwner || user?.role === 'MANAGER'
-  const effectiveBranchId = resolveBranchId({ isOwner, selectedBranchId, user })
+  const effectiveBranchId = resolveBranchId({ isOwner, selectedBranchId, user, branches })
 
   useEffect(() => {
     if (isOwner) {
       branchesApi.list().then((res) => {
         const list = (res.data || []).filter((b) => b.isActive)
         setBranches(list)
-        if (list.length && (!selectedBranchId || !list.find((b) => b.id === Number(selectedBranchId)))) {
-          setSelectedBranchId(list[0].id)
+        if (list.length) {
+          setSelectedBranchId((prev) => {
+            if (prev != null && list.some((b) => b.id === Number(prev))) {
+              return Number(prev)
+            }
+            if (userBranchId != null && list.some((b) => b.id === Number(userBranchId))) {
+              return Number(userBranchId)
+            }
+            return list[0].id
+          })
         }
       }).catch(() => {})
     } else {
@@ -940,7 +948,7 @@ export default function MenuPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--brown-800)' }}>📍 Branch:</span>
               <select
-                value={selectedBranchId}
+                value={selectedBranchId ?? effectiveBranchId ?? ''}
                 onChange={e => setSelectedBranchId(Number(e.target.value))}
                 style={{
                   padding: '8px 14px',
