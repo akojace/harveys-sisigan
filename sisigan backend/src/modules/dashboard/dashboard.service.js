@@ -135,7 +135,7 @@ async function getDashboard({ period = 'today', from, to, branchId }, requesting
               select: {
                 id: true,
                 name: true,
-                photo: true,
+                imageUrl: true,
                 category: { select: { id: true, name: true } },
                 recipes: {
                   include: {
@@ -261,7 +261,7 @@ async function getDashboard({ period = 'today', from, to, branchId }, requesting
         itemSalesMap[id] = {
           id,
           name,
-          photo: photoToDataUri(item.menuItem?.photo),
+          photo: item.menuItem?.imageUrl || null,
           qty: 0,
           revenue: 0,
           cogs: 0,
@@ -442,7 +442,7 @@ async function getBestSellers({ period = 'today', from, to, branchId, limit = 5 
               id: true,
               name: true,
               price: true,
-              photo: true,
+              imageUrl: true,
               category: { select: { id: true, name: true } },
             },
           },
@@ -474,7 +474,7 @@ async function getBestSellers({ period = 'today', from, to, branchId, limit = 5 
             name,
             category: item.menuItem?.category?.name || 'Uncategorized',
             price: Number(item.menuItem?.price || 0),
-            photo: photoToDataUri(item.menuItem?.photo),
+            photo: item.menuItem?.imageUrl || null,
             qty: 0,
             revenue: 0,
             cogs: 0,
@@ -547,7 +547,7 @@ async function getBestSellers({ period = 'today', from, to, branchId, limit = 5 
             name,
             category: item.menuItem?.category?.name || 'Uncategorized',
             price: Number(item.menuItem?.price || 0),
-            photo: photoToDataUri(item.menuItem?.photo),
+            photo: item.menuItem?.imageUrl || null,
             qty: 0,
             revenue: 0,
             cogs: 0,
@@ -644,7 +644,9 @@ async function getIngredientRecommendations({ items, branchId }, requestingUser)
 
   const menuItems = await prisma.menuItem.findMany({
     where: { name: { in: items.map((i) => i.itemName) } },
-    include: {
+    select: {
+      id: true,
+      name: true,
       recipes: {
         include: {
           ingredient: {
@@ -768,7 +770,7 @@ async function getProfitReport({ period = 'today', from, to, branchId }, request
               select: {
                 id: true,
                 name: true,
-                photo: true,
+                imageUrl: true,
                 category: { select: { id: true, name: true } },
                 recipes: {
                   include: {

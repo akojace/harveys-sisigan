@@ -35,9 +35,24 @@ function photoToDataUri(photoBuffer) {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
+function getMenuItemSelect(includePhoto = false) {
+  return {
+    id: true,
+    name: true,
+    description: true,
+    price: true,
+    imageUrl: true,
+    isAvailable: true,
+    categoryId: true,
+    createdAt: true,
+    updatedAt: true,
+    ...(includePhoto ? { photo: true } : {}),
+  };
+}
+
 function serializeItem(item, includePhoto = false) {
   const { photo, ...rest } = item;
-  return includePhoto ? { ...rest, photo: photoToDataUri(photo) } : rest;
+  return includePhoto && photo ? { ...rest, photo: photoToDataUri(photo) } : rest;
 }
 
 /**
@@ -297,7 +312,11 @@ async function getMenuWithCategories({
   branchId = null,
 }) {
   const rawMenu = await prisma.category.findMany({
-    include: { items: true },
+    include: {
+      items: {
+        select: getMenuItemSelect(includePhoto),
+      },
+    },
     orderBy: { sortOrder: 'asc' },
   });
 
@@ -361,7 +380,10 @@ async function getAllMenuItems({
   branchId = null,
 }) {
   const rawItems = await prisma.menuItem.findMany({
-    include: { category: { select: { id: true, name: true } } },
+    select: {
+      ...getMenuItemSelect(includePhoto),
+      category: { select: { id: true, name: true } },
+    },
     orderBy: { name: 'asc' },
   });
 
@@ -433,7 +455,10 @@ async function createMenuItem({ name, description, price, imageUrl, categoryId, 
 }
 
 async function updateMenuItem(id, data) {
-  const item = await prisma.menuItem.findUnique({ where: { id: Number(id) } });
+  const item = await prisma.menuItem.findUnique({
+    where: { id: Number(id) },
+    select: { id: true, name: true, isAvailable: true },
+  });
   if (!item) throw { statusCode: 404, message: 'Menu item not found.' };
 
   const photoBuffer = data.photo !== undefined
@@ -459,7 +484,10 @@ async function updateMenuItem(id, data) {
 }
 
 async function toggleAvailability(id, { branchId = null, global = false } = {}, requestingUser = null) {
-  const item = await prisma.menuItem.findUnique({ where: { id: Number(id) } });
+  const item = await prisma.menuItem.findUnique({
+    where: { id: Number(id) },
+    select: { id: true, name: true, isAvailable: true },
+  });
   if (!item) throw { statusCode: 404, message: 'Menu item not found.' };
 
   // If explicitly requested as global toggle (Owner only) or if no branch is scoped for an Owner
@@ -531,7 +559,10 @@ async function toggleAvailability(id, { branchId = null, global = false } = {}, 
 async function getRecipeForMenuItem(menuItemId, branchId = null) {
   const item = await prisma.menuItem.findUnique({
     where: { id: Number(menuItemId) },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      price: true,
       recipes: {
         include: {
           ingredient: {
@@ -596,7 +627,10 @@ async function getRecipeForMenuItem(menuItemId, branchId = null) {
 }
 
 async function upsertRecipeIngredient(menuItemId, { ingredientId, quantity, unit, yieldFactor = 1.00 }) {
-  const item = await prisma.menuItem.findUnique({ where: { id: Number(menuItemId) } });
+  const item = await prisma.menuItem.findUnique({
+    where: { id: Number(menuItemId) },
+    select: { id: true },
+  });
   if (!item) throw { statusCode: 404, message: 'Menu item not found.' };
 
   const ingredient = await prisma.ingredient.findUnique({ where: { id: Number(ingredientId) } });
@@ -664,7 +698,10 @@ async function deleteRecipeIngredient(menuItemId, ingredientId) {
 }
 
 async function setRecipeIngredients(menuItemId, ingredients) {
-  const item = await prisma.menuItem.findUnique({ where: { id: Number(menuItemId) } });
+  const item = await prisma.menuItem.findUnique({
+    where: { id: Number(menuItemId) },
+    select: { id: true },
+  });
   if (!item) throw { statusCode: 404, message: 'Menu item not found.' };
 
   return prisma.$transaction(async (tx) => {
@@ -718,7 +755,11 @@ async function checkMenuItemStock(menuItemId, branchId) {
 
   const item = await prisma.menuItem.findUnique({
     where: { id: mId },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      isAvailable: true,
       category: { select: { id: true, name: true } },
     },
   });
@@ -778,7 +819,11 @@ async function getMenuItemAvailability(menuItemId, requestingUser, { branchId = 
   const mId = Number(menuItemId);
   const item = await prisma.menuItem.findUnique({
     where: { id: mId },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      isAvailable: true,
       category: { select: { id: true, name: true } },
     },
   });

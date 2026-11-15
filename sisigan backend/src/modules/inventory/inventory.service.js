@@ -795,7 +795,9 @@ async function restoreInventoryForOrder({ tx, orderId, reason = 'Order cancelled
       items: {
         include: {
           menuItem: {
-            include: {
+            select: {
+              id: true,
+              name: true,
               recipes: {
                 include: { ingredient: true },
               },

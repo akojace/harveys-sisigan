@@ -55,6 +55,7 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
   const menuItemIds = items.map((i) => Number(i.menuItemId));
   const menuItems = await prisma.menuItem.findMany({
     where: { id: { in: menuItemIds }, isAvailable: true },
+    select: { id: true, name: true, price: true, isAvailable: true },
   });
 
   if (menuItems.length !== menuItemIds.length) {
@@ -257,7 +258,11 @@ async function getOrderById(orderId, { userRole, userBranchId }) {
     where: { id: Number(orderId) },
     include: {
       items: {
-        include: { menuItem: true },
+        include: {
+          menuItem: {
+            select: { id: true, name: true, price: true, imageUrl: true, categoryId: true },
+          },
+        },
       },
       payments: true,
       cashier: { select: { id: true, name: true } },
