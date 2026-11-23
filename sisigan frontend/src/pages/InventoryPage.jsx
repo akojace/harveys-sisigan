@@ -555,7 +555,13 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
               min="0.001"
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
-              placeholder={isGramConverted ? 'Enter number of orders (e.g. 10)' : 'e.g. 500'}
+              placeholder={
+                isGramConverted
+                  ? 'Enter number of orders (e.g. 10)'
+                  : ['TANK', 'PCS', 'PACK', 'BAG', 'TUB'].includes(unit)
+                  ? 'e.g. 1'
+                  : 'e.g. 100'
+              }
               required
             />
             {!isGramConverted && (

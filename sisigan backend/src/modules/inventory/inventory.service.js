@@ -1808,4 +1808,5 @@ module.exports = {
   getTransfers,
   getInventoryItemDependencies,
   deleteInventoryItem,
+  resolveIngredientGramConversion,
 };
