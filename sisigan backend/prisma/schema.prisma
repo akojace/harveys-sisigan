@@ -199,6 +199,7 @@ model Ingredient {
   defaultDailyDeduction      Decimal?                   @db.Decimal(12, 3)
   defaultPrice               Decimal?                   @db.Decimal(12, 4)
   defaultMinThreshold        Decimal?                   @db.Decimal(12, 3)
+  gramsPerUnit               Decimal?                   @db.Decimal(12, 3)
   createdAt                  DateTime                   @default(now())
   updatedAt                  DateTime                   @updatedAt
   inventory                  InventoryItem[]
@@ -398,6 +399,9 @@ model InventoryTransfer {
   ingredientId    Int
   quantity        Decimal        @db.Decimal(12, 3)
   unit            InventoryUnit
+  inputQuantity   Decimal?       @db.Decimal(12, 3)
+  inputUnit       String?        @db.VarChar(50)
+  conversionFactor Decimal?      @db.Decimal(12, 3)
   status          TransferStatus @default(COMPLETED)
   unitCost        Decimal?       @db.Decimal(12, 4)
   totalCost       Decimal?       @db.Decimal(12, 2)

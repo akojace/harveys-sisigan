@@ -133,6 +133,15 @@ async function getTransfers(req, res, next) {
   }
 }
 
+async function cancelTransfer(req, res, next) {
+  try {
+    const data = await inventoryService.cancelTransfer(req.params.id, req.user);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getInventoryDependencies(req, res, next) {
   try {
     const { branchId } = req.query;
@@ -169,6 +178,7 @@ module.exports = {
   restockInventory,
   adjustInventory,
   transferStock,
+  cancelTransfer,
   getTransfers,
   getInventoryDependencies,
   deleteInventory,

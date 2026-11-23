@@ -128,6 +128,10 @@ async function createNotificationIdempotent(db, data, createFn) {
     if (err?.code === 'P2002') {
       return null;
     }
+    // Prisma P2003 foreign key constraint violation (e.g. inventoryItem deleted before background outbox dispatch)
+    if (err?.code === 'P2003') {
+      return null;
+    }
     throw err;
   }
 }

@@ -51,6 +51,7 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
     quantity: '',
     minThreshold: '',
     price: '',
+    gramsPerUnit: '',
     consumptionRateDays: '',
     consumptionLabel: '',
     dailyDeductionAmount: '',
@@ -75,6 +76,7 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
       if (isOwner && form.branchId) payload.branchId = Number(form.branchId)
       if (form.minThreshold !== '') payload.minThreshold = Number(form.minThreshold)
       if (form.price !== '') payload.price = Number(form.price)
+      if (form.gramsPerUnit !== '') payload.gramsPerUnit = Number(form.gramsPerUnit)
       if (form.consumptionRateDays !== '') payload.consumptionRateDays = Number(form.consumptionRateDays)
       if (form.consumptionLabel.trim()) payload.consumptionLabel = form.consumptionLabel.trim()
       if (form.dailyDeductionAmount !== '') payload.dailyDeductionAmount = Number(form.dailyDeductionAmount)
@@ -125,13 +127,23 @@ function AddIngredientModal({ isOwner, branches, branchId, onClose, onSaved }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <Input label="Price (optional)" type="number" value={form.price} onChange={(e) => set('price', e.target.value)} />
-          <Input label="Consumption Days" type="number" value={form.consumptionRateDays} onChange={(e) => set('consumptionRateDays', e.target.value)} />
+          <Input
+            label="Grams per Unit (Optional)"
+            type="number"
+            step="any"
+            min="0.001"
+            value={form.gramsPerUnit}
+            onChange={(e) => set('gramsPerUnit', e.target.value)}
+            placeholder="e.g. 100 (for unit conversion)"
+          />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
-          <Input label="Consumption Label" value={form.consumptionLabel} onChange={(e) => set('consumptionLabel', e.target.value)} placeholder="e.g. Daily" />
+          <Input label="Consumption Days" type="number" value={form.consumptionRateDays} onChange={(e) => set('consumptionRateDays', e.target.value)} />
           <Input label="Daily Deduction" type="number" value={form.dailyDeductionAmount} onChange={(e) => set('dailyDeductionAmount', e.target.value)} />
         </div>
+
+        <Input label="Consumption Label" value={form.consumptionLabel} onChange={(e) => set('consumptionLabel', e.target.value)} placeholder="e.g. Daily" />
 
         {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div>}
 
@@ -159,6 +171,7 @@ function EditIngredientModal({ item, onClose, onSaved }) {
     unit: item.ingredient?.unit || 'PCS',
     minThreshold: item.minThreshold != null ? String(item.minThreshold) : '',
     price: item.price != null ? String(item.price) : '',
+    gramsPerUnit: item.ingredient?.gramsPerUnit != null ? String(item.ingredient.gramsPerUnit) : '',
     consumptionRateDays: item.consumptionRateDays != null ? String(item.consumptionRateDays) : '',
     consumptionLabel: item.consumptionLabel || '',
     dailyDeductionAmount: item.dailyDeductionAmount != null ? String(item.dailyDeductionAmount) : '',
@@ -178,6 +191,11 @@ function EditIngredientModal({ item, onClose, onSaved }) {
       }
       if (form.minThreshold !== '') payload.minThreshold = Number(form.minThreshold)
       if (form.price !== '') payload.price = Number(form.price)
+      if (form.gramsPerUnit !== '') {
+        payload.gramsPerUnit = Number(form.gramsPerUnit)
+      } else {
+        payload.gramsPerUnit = null
+      }
       if (form.consumptionRateDays !== '') payload.consumptionRateDays = Number(form.consumptionRateDays)
       payload.consumptionLabel = form.consumptionLabel.trim()
       if (form.dailyDeductionAmount !== '') payload.dailyDeductionAmount = Number(form.dailyDeductionAmount)
@@ -219,11 +237,22 @@ function EditIngredientModal({ item, onClose, onSaved }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <Input
+            label="Grams per Unit / Order"
+            type="number"
+            step="any"
+            min="0.001"
+            value={form.gramsPerUnit}
+            onChange={(e) => set('gramsPerUnit', e.target.value)}
+            placeholder="e.g. 100 (auto gram conversion)"
+          />
           <Input label="Consumption Days" type="number" value={form.consumptionRateDays} onChange={(e) => set('consumptionRateDays', e.target.value)} />
-          <Input label="Daily Deduction" type="number" value={form.dailyDeductionAmount} onChange={(e) => set('dailyDeductionAmount', e.target.value)} />
         </div>
 
-        <Input label="Consumption Label" value={form.consumptionLabel} onChange={(e) => set('consumptionLabel', e.target.value)} placeholder="e.g. Daily" />
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <Input label="Daily Deduction" type="number" value={form.dailyDeductionAmount} onChange={(e) => set('dailyDeductionAmount', e.target.value)} />
+          <Input label="Consumption Label" value={form.consumptionLabel} onChange={(e) => set('consumptionLabel', e.target.value)} placeholder="e.g. Daily" />
+        </div>
 
         {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div>}
 
@@ -348,6 +377,14 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
 
   const selectedItem = availableItems.find((i) => Number(i.ingredientId) === Number(ingredientId))
   const unit = selectedItem?.ingredient?.unit || 'GRAM'
+  const gpu = selectedItem?.ingredient?.gramsPerUnit ? Number(selectedItem.ingredient.gramsPerUnit) : null
+  const isGramConverted = gpu !== null && gpu > 0
+
+  const enteredQty = Number(quantity) || 0
+  const calculatedGrams = isGramConverted ? Math.round(enteredQty * gpu * 1000) / 1000 : null
+  const availableStock = selectedItem ? Number(selectedItem.quantity) : 0
+  const requiredStock = isGramConverted ? calculatedGrams : enteredQty
+  const isOverStock = selectedItem && enteredQty > 0 && requiredStock > availableStock
 
   // Destination branches (exclude source)
   const destinationBranches = branches.filter((b) => Number(b.id) !== Number(sourceBranchId))
@@ -363,24 +400,42 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
       setError('Quantity must be greater than zero.')
       return
     }
-    if (selectedItem && q > Number(selectedItem.quantity)) {
-      setError(`Cannot transfer ${q} ${unit}. Only ${Number(selectedItem.quantity).toFixed(2)} ${unit} available in source branch.`)
+    if (isOverStock) {
+      setError(
+        isGramConverted
+          ? `Cannot transfer ${calculatedGrams.toLocaleString()} g (${enteredQty.toLocaleString()} units). Only ${availableStock.toLocaleString()} g available in source branch.`
+          : `Cannot transfer ${enteredQty} ${unit}. Only ${availableStock.toFixed(2)} ${unit} available in source branch.`
+      )
       return
     }
 
     setLoading(true)
     setError('')
     try {
-      const res = await inventoryApi.transfer({
+      const payload = {
         sourceBranchId: Number(sourceBranchId),
         destBranchId: Number(destBranchId),
         ingredientId: Number(ingredientId),
-        quantity: q,
-        unit,
         notes: notes.trim() || undefined,
-      })
+      }
 
-      setSuccess(`Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q} ${unit}.`)
+      if (isGramConverted) {
+        payload.inputQuantity = q
+        payload.inputUnit = 'UNITS'
+        payload.quantity = q
+        payload.unit = 'GRAM'
+      } else {
+        payload.quantity = q
+        payload.unit = unit
+      }
+
+      const res = await inventoryApi.transfer(payload)
+
+      setSuccess(
+        isGramConverted
+          ? `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q.toLocaleString()} units (${calculatedGrams.toLocaleString()} g).`
+          : `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q} ${unit}.`
+      )
       setTimeout(() => {
         onSaved()
       }, 1200)
@@ -392,7 +447,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
   }
 
   return (
-    <Modal title="Inter-Branch Inventory Transfer" onClose={onClose} width={520}>
+    <Modal title="Inter-Branch Inventory Transfer" onClose={onClose} width={540}>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div>}
         {success && <div style={{ color: 'var(--green-dark)', fontSize: 13, fontWeight: 700 }}>{success}</div>}
@@ -438,11 +493,14 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
             required
           >
             <option value="">Select available ingredient...</option>
-            {availableItems.map((item) => (
-              <option key={item.id} value={item.ingredientId}>
-                {item.ingredient?.name} (Stock: {Number(item.quantity).toFixed(2)} {item.ingredient?.unit} @ ₱{Number(item.price || item.unitCost || 0).toFixed(2)})
-              </option>
-            ))}
+            {availableItems.map((item) => {
+              const itemGpu = item.ingredient?.gramsPerUnit ? Number(item.ingredient.gramsPerUnit) : null
+              return (
+                <option key={item.id} value={item.ingredientId}>
+                  {item.ingredient?.name} {itemGpu ? `(⚖️ ${itemGpu} g/unit)` : ''} — Stock: {Number(item.quantity).toFixed(2)} {item.ingredient?.unit} @ ₱{Number(item.price || item.unitCost || 0).toFixed(2)}
+                </option>
+              )
+            })}
           </select>
           {availableItems.length === 0 && (
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
@@ -451,26 +509,80 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
           )}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isGramConverted ? '1fr' : '2fr 1fr', gap: 12 }}>
           <Input
-            label={`Transfer Quantity (${unit}) *`}
+            label={isGramConverted ? 'Transfer Quantity (Units / Orders) *' : `Transfer Quantity (${unit}) *`}
             type="number"
             step="any"
+            min="0.001"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
-            placeholder="e.g. 500"
+            placeholder={isGramConverted ? 'e.g. 10' : 'e.g. 500'}
             required
           />
-          <div>
-            <label style={lbl}>Unit</label>
-            <input
-              type="text"
-              value={unit}
-              disabled
-              style={{ ...selectStyle, background: 'var(--brown-50)', color: 'var(--text-dark)', cursor: 'default' }}
-            />
-          </div>
+          {!isGramConverted && (
+            <div>
+              <label style={lbl}>Unit</label>
+              <input
+                type="text"
+                value={unit}
+                disabled
+                style={{ ...selectStyle, background: 'var(--brown-50)', color: 'var(--text-dark)', cursor: 'default' }}
+              />
+            </div>
+          )}
         </div>
+
+        {isGramConverted && (
+          <div
+            style={{
+              background: isOverStock ? 'var(--red-light)' : '#fdf8f0',
+              border: `1.5px solid ${isOverStock ? 'var(--red)' : '#f3d9b4'}`,
+              borderRadius: 'var(--radius-md)',
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--brown-900)' }}>
+                ⚖️ Automated Gram Conversion Details
+              </span>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                Conversion: <strong>{gpu.toLocaleString()} g/unit</strong>
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '8px 0' }}>
+              <div style={{ background: '#fff', padding: '8px', borderRadius: 6, border: '1px solid #ebd3ba', textAlign: 'center' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Grams per unit</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brown-900)', marginTop: 2 }}>{gpu.toLocaleString()} g</div>
+              </div>
+              <div style={{ background: '#fff', padding: '8px', borderRadius: 6, border: '1px solid #ebd3ba', textAlign: 'center' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Quantity entered</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brown-900)', marginTop: 2 }}>{enteredQty.toLocaleString()} units</div>
+              </div>
+              <div style={{ background: '#fff', padding: '8px', borderRadius: 6, border: `1.5px solid ${isOverStock ? 'var(--red)' : 'var(--brown-600)'}`, textAlign: 'center' }}>
+                <div style={{ fontSize: 10.5, color: isOverStock ? 'var(--red)' : 'var(--brown-700)', textTransform: 'uppercase', fontWeight: 700 }}>Calculated weight</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: isOverStock ? 'var(--red)' : 'var(--brown-900)', marginTop: 2 }}>
+                  {calculatedGrams.toLocaleString()} g
+                </div>
+              </div>
+            </div>
+
+            {isOverStock ? (
+              <div style={{ color: 'var(--red-dark)', fontSize: 12.5, fontWeight: 600, marginTop: 4 }}>
+                ⚠️ Transfer exceeds available source stock ({availableStock.toLocaleString()} g available).
+              </div>
+            ) : enteredQty > 0 ? (
+              <div style={{ color: 'var(--green-dark)', fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+                ✓ Source loses <strong>{calculatedGrams.toLocaleString()} g</strong>; Destination receives <strong>{calculatedGrams.toLocaleString()} g</strong>.
+              </div>
+            ) : (
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
+                Enter transfer quantity in units to calculate total grams automatically.
+              </div>
+            )}
+          </div>
+        )}
 
         <Input
           label="Transfer Notes / Justification (Optional)"
@@ -481,7 +593,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={loading || !destBranchId || !ingredientId || !quantity}>
+          <Button type="submit" variant="primary" disabled={loading || !destBranchId || !ingredientId || !quantity || isOverStock}>
             {loading ? 'Transferring...' : 'Confirm Transfer'}
           </Button>
         </div>
@@ -581,6 +693,8 @@ export default function InventoryPage() {
   const [branchId, setBranchId] = useState(() => (isOwner ? (searchParams.get('branchId') || '') : ''))
   const [branches, setBranches] = useState([])
   const [inventory, setInventory] = useState([])
+  const [transfers, setTransfers] = useState([])
+  const [cancellingTransferId, setCancellingTransferId] = useState(null)
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
   const [showAdd, setShowAdd] = useState(false)
@@ -606,13 +720,15 @@ export default function InventoryPage() {
       const params = {}
       if (branchId) params.branchId = branchId
 
-      const [invRes, reportRes] = await Promise.all([
+      const [invRes, reportRes, trfRes] = await Promise.all([
         inventoryApi.list(params),
         reportsApi.usage({ ...params, period: 'weekly' }),
+        inventoryApi.transfers(params),
       ])
 
       setInventory(invRes.data || [])
       setReport(reportRes.data || null)
+      setTransfers(trfRes.data || [])
     } catch (e) {
       setError(e.message)
     } finally {
@@ -621,6 +737,22 @@ export default function InventoryPage() {
   }, [branchId])
 
   useEffect(() => { load() }, [load])
+
+  async function handleCancelTransfer(transfer) {
+    if (!window.confirm(`Cancel transfer ${transfer.transferNo} and return ${Number(transfer.quantity).toLocaleString()} ${transfer.unit} to ${transfer.sourceBranch?.name}?`)) {
+      return
+    }
+    setCancellingTransferId(transfer.id)
+    try {
+      await inventoryApi.cancelTransfer(transfer.id)
+      setNotice(`Transfer ${transfer.transferNo} cancelled. Inventory restored to ${transfer.sourceBranch?.name}.`)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCancellingTransferId(null)
+    }
+  }
 
   const lowStockItems = useMemo(
     () => inventory.filter((i) => Number(i.quantity) <= Number(i.minThreshold)),
@@ -758,7 +890,28 @@ export default function InventoryPage() {
                           background: isHighlighted ? '#fef3c7' : undefined,
                         }}
                       >
-                        <td style={{ padding: '9px 12px', fontWeight: 600 }}>{item.ingredient?.name}</td>
+                        <td style={{ padding: '9px 12px', fontWeight: 600 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{item.ingredient?.name}</span>
+                            {item.ingredient?.gramsPerUnit && (
+                              <span
+                                title={`Automated Gram Conversion: 1 unit/order = ${Number(item.ingredient.gramsPerUnit)} g`}
+                                style={{
+                                  fontSize: 10.5,
+                                  fontWeight: 700,
+                                  padding: '2px 7px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  background: 'var(--brown-100)',
+                                  color: 'var(--brown-800)',
+                                  border: '1px solid var(--brown-300)',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                ⚖️ {Number(item.ingredient.gramsPerUnit)} g/unit
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td style={{ padding: '9px 12px', color: 'var(--text-mid)' }}>{item.ingredient?.category}</td>
                         <td style={{ padding: '9px 12px' }}>{Number(item.quantity).toFixed(3)} {item.ingredient?.unit}</td>
                         <td style={{ padding: '9px 12px' }}>{Number(item.minThreshold).toFixed(3)} {item.ingredient?.unit}</td>
@@ -843,6 +996,104 @@ export default function InventoryPage() {
           </ResponsiveContainer>
         )}
       </Section>
+
+      <div style={{ marginTop: 18 }}>
+        <Section
+          title="Inter-Branch Stock Transfer History"
+          right={
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {transfers.length} transfer{transfers.length === 1 ? '' : 's'} recorded
+            </div>
+          }
+        >
+          {transfers.length === 0 ? (
+            <EmptyState icon="🔄" title="No transfers yet" subtitle="Completed and cancelled branch transfers will appear here with automated gram conversion audit records" />
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--brown-50)' }}>
+                    {['Reference', 'Date & Time', 'Source', 'Destination', 'Ingredient', 'Transferred Amount', 'Cost', 'Status', 'Operator', 'Action'].map((h) => (
+                      <th key={h} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {transfers.map((trf, idx) => {
+                    const hasConv = trf.conversionFactor != null
+                    const isCompleted = trf.status === 'COMPLETED'
+                    return (
+                      <tr key={trf.id} style={{ borderBottom: idx < transfers.length - 1 ? '1px solid var(--border-light)' : 'none' }}>
+                        <td style={{ padding: '9px 12px', fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{trf.transferNo}</td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 12 }}>{new Date(trf.createdAt).toLocaleString()}</td>
+                        <td style={{ padding: '9px 12px', fontWeight: 600 }}>{trf.sourceBranch?.name}</td>
+                        <td style={{ padding: '9px 12px', fontWeight: 600 }}>{trf.destBranch?.name}</td>
+                        <td style={{ padding: '9px 12px', fontWeight: 600 }}>
+                          {trf.ingredient?.name}
+                          {hasConv && (
+                            <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--brown-100)', color: 'var(--brown-700)' }}>
+                              ⚖️ {Number(trf.conversionFactor)} g/unit
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '9px 12px' }}>
+                          {hasConv ? (
+                            <div>
+                              <strong>{Number(trf.inputQuantity || 0).toLocaleString()} {trf.inputUnit || 'units'}</strong>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                = {Number(trf.quantity).toLocaleString()} {trf.unit} ({Number(trf.conversionFactor)} g/unit)
+                              </div>
+                            </div>
+                          ) : (
+                            <span><strong>{Number(trf.quantity).toLocaleString()}</strong> {trf.unit}</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '9px 12px' }}>{trf.totalCost ? `₱${Number(trf.totalCost).toFixed(2)}` : '-'}</td>
+                        <td style={{ padding: '9px 12px' }}>
+                          <span style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: 'var(--radius-full)',
+                            background: isCompleted ? 'var(--green-light)' : 'var(--red-light)',
+                            color: isCompleted ? 'var(--green-dark)' : 'var(--red-dark)',
+                          }}>
+                            {trf.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 12 }}>{trf.actor?.name || 'Authorized User'}</td>
+                        <td style={{ padding: '9px 12px' }}>
+                          {isCompleted && (isOwner || user?.branchId === trf.sourceBranchId) && (
+                            <button
+                              onClick={() => handleCancelTransfer(trf)}
+                              disabled={cancellingTransferId === trf.id}
+                              style={{
+                                padding: '4px 8px',
+                                border: '1px solid var(--red-light)',
+                                borderRadius: 'var(--radius-sm)',
+                                background: '#fff',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                color: 'var(--red)',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {cancellingTransferId === trf.id ? 'Reversing…' : '↩️ Cancel'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      </div>
 
       {showAdd && (
         <AddIngredientModal

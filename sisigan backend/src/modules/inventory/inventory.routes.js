@@ -60,6 +60,7 @@ router.post(
     body('consumptionRateDays').optional({ nullable: true }).isInt({ min: 1 }).withMessage('consumptionRateDays must be >= 1.'),
     body('consumptionLabel').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
     body('dailyDeductionAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('dailyDeductionAmount must be non-negative.'),
+    body('gramsPerUnit').optional({ nullable: true }).isFloat({ min: 0.0001 }).withMessage('gramsPerUnit must be a positive number.'),
   ],
   inventoryController.createInventory
 );
@@ -86,6 +87,14 @@ router.patch(
     body('consumptionRateDays').optional({ nullable: true }).isInt({ min: 1 }).withMessage('consumptionRateDays must be >= 1.'),
     body('consumptionLabel').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
     body('dailyDeductionAmount').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('dailyDeductionAmount must be non-negative.'),
+    body('gramsPerUnit')
+      .optional({ nullable: true })
+      .custom((val) => {
+        if (val === null || val === '') return true;
+        const n = Number(val);
+        if (Number.isNaN(n) || n <= 0) throw new Error('gramsPerUnit must be a positive number.');
+        return true;
+      }),
   ],
   inventoryController.patchInventoryDetails
 );
@@ -97,12 +106,17 @@ router.post(
     body('sourceBranchId').isInt({ min: 1 }).withMessage('sourceBranchId is required.'),
     body('destBranchId').isInt({ min: 1 }).withMessage('destBranchId is required.'),
     body('ingredientId').isInt({ min: 1 }).withMessage('ingredientId is required.'),
-    body('quantity').isFloat({ min: 0.0001 }).withMessage('quantity must be greater than 0.'),
-    body('unit').optional().isIn(VALID_UNITS).withMessage('Invalid unit.'),
+    body('quantity').optional().isFloat({ min: 0.0001 }).withMessage('quantity must be greater than 0.'),
+    body('inputQuantity').optional().isFloat({ min: 0.0001 }).withMessage('inputQuantity must be greater than 0.'),
+    body('unit').optional().isString().trim(),
+    body('inputUnit').optional().isString().trim(),
     body('notes').optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   ],
   inventoryController.transferStock
 );
+
+// POST /api/inventory/transfers/:id/cancel — Cancel transfer and restore inventory atomically
+router.post('/transfers/:id/cancel', inventoryController.cancelTransfer);
 
 // GET /api/inventory/transfers — List cross-branch transfers
 router.get('/transfers', inventoryController.getTransfers);

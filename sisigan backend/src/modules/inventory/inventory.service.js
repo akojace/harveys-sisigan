@@ -53,6 +53,7 @@ async function getInventory({ branchId, lowOnly = false, search = '' }, requesti
           unit: true,
           defaultPrice: true,
           yieldPercentage: true,
+          gramsPerUnit: true,
         },
       },
     },
@@ -73,6 +74,10 @@ async function getInventory({ branchId, lowOnly = false, search = '' }, requesti
 
     return {
       ...row,
+      ingredient: {
+        ...row.ingredient,
+        gramsPerUnit: row.ingredient?.gramsPerUnit != null ? Number(row.ingredient.gramsPerUnit) : null,
+      },
       quantity: roundDecimals(qty, 3),
       minThreshold: roundDecimals(min, 3),
       unitCost: roundDecimals(unitPrice, 4),
@@ -352,7 +357,7 @@ async function updateInventoryItem(itemId, { quantity, note }, requestingUser) {
  * WITHOUT touching quantity.
  */
 async function updateIngredientDetails(itemId, payload, requestingUser) {
-  const { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount, yieldPercentage } = payload;
+  const { category, unit, price, minThreshold, consumptionRateDays, consumptionLabel, dailyDeductionAmount, yieldPercentage, gramsPerUnit } = payload;
 
   const existing = await prisma.inventoryItem.findUnique({
     where: { id: Number(itemId) },
@@ -373,6 +378,19 @@ async function updateIngredientDetails(itemId, payload, requestingUser) {
   const daily = dailyDeductionAmount !== undefined && dailyDeductionAmount !== null && dailyDeductionAmount !== '' ? Number(dailyDeductionAmount) : null;
   const yieldPct = yieldPercentage !== undefined && yieldPercentage !== null && yieldPercentage !== '' ? Number(yieldPercentage) : undefined;
 
+  let gpu = undefined;
+  if (gramsPerUnit !== undefined) {
+    if (gramsPerUnit === null || gramsPerUnit === '') {
+      gpu = null;
+    } else {
+      const parsedGpu = Number(gramsPerUnit);
+      if (Number.isNaN(parsedGpu) || parsedGpu <= 0) {
+        throw { statusCode: 400, message: 'gramsPerUnit must be a positive number greater than zero.' };
+      }
+      gpu = parsedGpu;
+    }
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     // Only OWNER can update master ingredient template
     if (requestingUser.role === 'OWNER') {
@@ -387,6 +405,7 @@ async function updateIngredientDetails(itemId, payload, requestingUser) {
           ...(rateDays !== null && { defaultConsumptionRateDays: rateDays }),
           ...(consumptionLabel !== undefined && { defaultConsumptionLabel: consumptionLabel || null }),
           ...(daily !== null && { defaultDailyDeduction: daily }),
+          ...(gpu !== undefined && { gramsPerUnit: gpu }),
         },
       });
     }
@@ -403,7 +422,7 @@ async function updateIngredientDetails(itemId, payload, requestingUser) {
       },
       include: {
         branch: { select: { id: true, name: true, city: true } },
-        ingredient: { select: { id: true, name: true, category: true, unit: true, defaultPrice: true, yieldPercentage: true } },
+        ingredient: { select: { id: true, name: true, category: true, unit: true, defaultPrice: true, yieldPercentage: true, gramsPerUnit: true } },
       },
     });
 
@@ -457,6 +476,7 @@ async function createInventoryItem(payload, requestingUser) {
     consumptionRateDays,
     consumptionLabel,
     dailyDeductionAmount,
+    gramsPerUnit,
   } = payload;
 
   const scopedBranchId = getScopedBranchId(requestingUser, branchId);
@@ -477,6 +497,15 @@ async function createInventoryItem(payload, requestingUser) {
       ? Number(dailyDeductionAmount)
       : rateDays && qty ? qty / rateDays : null;
 
+  let gpu = null;
+  if (gramsPerUnit !== undefined && gramsPerUnit !== null && gramsPerUnit !== '') {
+    const parsedGpu = Number(gramsPerUnit);
+    if (Number.isNaN(parsedGpu) || parsedGpu <= 0) {
+      throw { statusCode: 400, message: 'gramsPerUnit must be a positive number greater than zero.' };
+    }
+    gpu = parsedGpu;
+  }
+
   const row = await prisma.$transaction(async (tx) => {
     const ingredient = await tx.ingredient.upsert({
       where: { name: String(name).trim() },
@@ -488,6 +517,7 @@ async function createInventoryItem(payload, requestingUser) {
         ...(consumptionLabel && { defaultConsumptionLabel: consumptionLabel }),
         ...(daily !== null && { defaultDailyDeduction: daily }),
         ...(p !== null && { defaultPrice: p }),
+        ...(gpu !== null && { gramsPerUnit: gpu }),
         defaultMinThreshold: min,
       },
       create: {
@@ -500,6 +530,7 @@ async function createInventoryItem(payload, requestingUser) {
         defaultDailyDeduction: daily,
         defaultPrice: p,
         defaultMinThreshold: min,
+        gramsPerUnit: gpu,
       },
     });
 
@@ -1133,17 +1164,20 @@ async function getAuditLogs({ branchId, actionType, from, to, limit = 100 }, req
 }
 
 /**
- * Transfer inventory stock from one branch to another atomically.
+ * Transfer inventory stock from one branch to another atomically with automated gram conversion support.
  */
 async function transferInventory(payload, requestingUser) {
-  const { sourceBranchId, destBranchId, ingredientId, quantity, unit, notes } = payload;
+  const { sourceBranchId, destBranchId, ingredientId, quantity, inputQuantity, unit, inputUnit, notes } = payload;
 
   const sBranchId = Number(sourceBranchId);
   const dBranchId = Number(destBranchId);
   const ingId = Number(ingredientId);
-  const qty = Number(quantity);
 
-  if (!sBranchId || !dBranchId || !ingId || Number.isNaN(qty) || qty <= 0) {
+  const rawEnteredQty = inputQuantity !== undefined && inputQuantity !== null && inputQuantity !== ''
+    ? Number(inputQuantity)
+    : (quantity !== undefined && quantity !== null && quantity !== '' ? Number(quantity) : NaN);
+
+  if (!sBranchId || !dBranchId || !ingId || Number.isNaN(rawEnteredQty) || rawEnteredQty <= 0) {
     throw { statusCode: 400, message: 'sourceBranchId, destBranchId, ingredientId, and positive quantity are required.' };
   }
 
@@ -1168,23 +1202,59 @@ async function transferInventory(payload, requestingUser) {
   if (!destBranch || !destBranch.isActive) throw { statusCode: 404, message: 'Destination branch not found or inactive.' };
   if (!ingredient) throw { statusCode: 404, message: 'Ingredient not found.' };
 
-  const transferUnit = unit || ingredient.unit;
-  let baseQuantity = qty;
-  try {
-    baseQuantity = convertQuantity(qty, transferUnit, ingredient.unit);
-  } catch (err) {
-    throw { statusCode: 400, message: `Unit conversion failed: ${err.message}` };
+  const configuredGpu = ingredient.gramsPerUnit != null ? Number(ingredient.gramsPerUnit) : null;
+  if (configuredGpu !== null && (Number.isNaN(configuredGpu) || configuredGpu <= 0)) {
+    throw { statusCode: 400, message: 'Configured conversion factor for this ingredient is invalid.' };
+  }
+
+  const isGramConverted = configuredGpu !== null && configuredGpu > 0;
+
+  let userEnteredUnits = null;
+  let snapInputUnit = null;
+  let conversionFactorSnapshot = null;
+  let baseQuantity = 0; // Actual inventory weight / quantity to deduct/credit (in ingredient.unit)
+  let transferDesc = '';
+
+  if (isGramConverted) {
+    // Formula: Calculated Total Grams = Transfer Quantity × Grams per Unit
+    userEnteredUnits = rawEnteredQty;
+    snapInputUnit = inputUnit || 'UNITS';
+    conversionFactorSnapshot = configuredGpu;
+
+    const calculatedGrams = roundDecimals(userEnteredUnits * configuredGpu, 3);
+    if (calculatedGrams <= 0) {
+      throw { statusCode: 400, message: 'Calculated transfer weight must be greater than 0.' };
+    }
+
+    if (ingredient.unit === 'KG') {
+      baseQuantity = roundDecimals(calculatedGrams / 1000, 3);
+    } else if (ingredient.unit === 'GRAM') {
+      baseQuantity = calculatedGrams;
+    } else {
+      baseQuantity = calculatedGrams;
+    }
+
+    transferDesc = `${userEnteredUnits} ${snapInputUnit} (${calculatedGrams.toLocaleString()} g @ ${configuredGpu} g/unit)`;
+  } else {
+    // Check if client tried to use unit-based gram conversion on an unconfigured item
+    if (inputQuantity !== undefined && inputQuantity !== null && inputUnit && inputUnit !== ingredient.unit) {
+      throw { statusCode: 400, message: `Ingredient "${ingredient.name}" does not have a configured gram conversion factor.` };
+    }
+    const transferUnit = unit || ingredient.unit;
+    try {
+      baseQuantity = convertQuantity(rawEnteredQty, transferUnit, ingredient.unit);
+    } catch (err) {
+      throw { statusCode: 400, message: `Unit conversion failed: ${err.message}` };
+    }
+    transferDesc = `${rawEnteredQty} ${transferUnit}`;
   }
 
   const transferNo = `TRF-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
   const result = await prisma.$transaction(async (tx) => {
-    // 1. Lock and inspect source item
-    const sourceItem = await tx.inventoryItem.findUnique({
-      where: {
-        branchId_ingredientId: { branchId: sBranchId, ingredientId: ingId },
-      },
-    });
+    // 1. Pessimistically lock and inspect source item (prevents concurrent race conditions)
+    const lockedRows = await tx.$queryRaw`SELECT id, branchId, ingredientId, quantity, price, minThreshold FROM inventory_items WHERE branchId = ${sBranchId} AND ingredientId = ${ingId} FOR UPDATE`;
+    const sourceItem = lockedRows && lockedRows.length > 0 ? lockedRows[0] : null;
 
     if (!sourceItem) {
       throw { statusCode: 400, message: `Ingredient "${ingredient.name}" does not exist in source branch #${sBranchId}.` };
@@ -1194,7 +1264,7 @@ async function transferInventory(payload, requestingUser) {
     if (sourceCurrentQty < baseQuantity) {
       throw {
         statusCode: 400,
-        message: `Insufficient stock in ${sourceBranch.name}. Available: ${sourceCurrentQty} ${ingredient.unit}, Transfer requested: ${baseQuantity} ${ingredient.unit}.`,
+        message: `Insufficient stock in ${sourceBranch.name}. Available: ${sourceCurrentQty} ${ingredient.unit}, Transfer requested: ${baseQuantity} ${ingredient.unit}${isGramConverted ? ` (${userEnteredUnits} units)` : ''}.`,
       };
     }
 
@@ -1208,11 +1278,21 @@ async function transferInventory(payload, requestingUser) {
     const transferTotalCost = roundDecimals(baseQuantity * sourceUnitCost, 2);
     const newSourceQty = roundDecimals(sourceCurrentQty - baseQuantity, 3);
 
-    // 2. Deduct from source branch
-    await tx.inventoryItem.update({
-      where: { id: sourceItem.id },
+    // 2. Deduct from source branch with stock boundary enforcement
+    const updateResult = await tx.inventoryItem.updateMany({
+      where: {
+        id: sourceItem.id,
+        quantity: { gte: baseQuantity },
+      },
       data: { quantity: newSourceQty },
     });
+
+    if (updateResult.count === 0) {
+      throw {
+        statusCode: 400,
+        message: `Insufficient stock in ${sourceBranch.name}. Available: ${sourceCurrentQty} ${ingredient.unit}, Transfer requested: ${baseQuantity} ${ingredient.unit}.`,
+      };
+    }
 
     await tx.inventoryAuditLog.create({
       data: {
@@ -1224,7 +1304,7 @@ async function transferInventory(payload, requestingUser) {
         unitCost: sourceUnitCost,
         totalCost: transferTotalCost,
         referenceNo: transferNo,
-        note: `Transferred ${qty} ${transferUnit} to ${destBranch.name}. ${notes || ''}`.trim(),
+        note: `Transferred ${transferDesc} to ${destBranch.name}. ${notes || ''}`.trim(),
         actorUserId: requestingUser.id,
       },
     });
@@ -1284,12 +1364,12 @@ async function transferInventory(payload, requestingUser) {
         unitCost: newDestCost,
         totalCost: transferTotalCost,
         referenceNo: transferNo,
-        note: `Received transfer of ${qty} ${transferUnit} from ${sourceBranch.name}. ${notes || ''}`.trim(),
+        note: `Received transfer of ${transferDesc} from ${sourceBranch.name}. ${notes || ''}`.trim(),
         actorUserId: requestingUser.id,
       },
     });
 
-    // 4. Record transfer ledger
+    // 4. Record transfer ledger with historical snapshots
     const transfer = await tx.inventoryTransfer.create({
       data: {
         transferNo,
@@ -1298,6 +1378,9 @@ async function transferInventory(payload, requestingUser) {
         ingredientId: ingId,
         quantity: baseQuantity,
         unit: ingredient.unit,
+        inputQuantity: isGramConverted ? userEnteredUnits : null,
+        inputUnit: isGramConverted ? snapInputUnit : null,
+        conversionFactor: isGramConverted ? conversionFactorSnapshot : null,
         unitCost: sourceUnitCost,
         totalCost: transferTotalCost,
         notes: notes || null,
@@ -1307,7 +1390,7 @@ async function transferInventory(payload, requestingUser) {
       include: {
         sourceBranch: { select: { id: true, name: true } },
         destBranch: { select: { id: true, name: true } },
-        ingredient: { select: { id: true, name: true, unit: true } },
+        ingredient: { select: { id: true, name: true, unit: true, gramsPerUnit: true } },
         actor: { select: { id: true, name: true, email: true } },
       },
     });
@@ -1355,12 +1438,142 @@ async function getTransfers({ branchId, status, limit = 50 }, requestingUser) {
     include: {
       sourceBranch: { select: { id: true, name: true } },
       destBranch: { select: { id: true, name: true } },
-      ingredient: { select: { id: true, name: true, unit: true } },
+      ingredient: { select: { id: true, name: true, unit: true, gramsPerUnit: true } },
       actor: { select: { id: true, name: true, email: true } },
     },
     orderBy: { createdAt: 'desc' },
     take: Math.min(Number(limit) || 50, 200),
   });
+}
+
+/**
+ * Cancel a completed transfer and atomically reverse inventory movements.
+ */
+async function cancelTransfer(transferId, requestingUser) {
+  const trfId = Number(transferId);
+  if (!trfId || trfId < 1) throw { statusCode: 400, message: 'Invalid transfer ID.' };
+
+  const result = await prisma.$transaction(async (tx) => {
+    const transfer = await tx.inventoryTransfer.findUnique({
+      where: { id: trfId },
+      include: {
+        sourceBranch: true,
+        destBranch: true,
+        ingredient: true,
+      },
+    });
+
+    if (!transfer) throw { statusCode: 404, message: 'Transfer not found.' };
+
+    if (transfer.status !== 'COMPLETED') {
+      throw { statusCode: 400, message: `Transfer cannot be cancelled because its status is already ${transfer.status}.` };
+    }
+
+    if (requestingUser.role !== 'OWNER' && Number(requestingUser.branchId) !== transfer.sourceBranchId) {
+      throw { statusCode: 403, message: 'Access denied. You can only cancel transfers originating from your branch.' };
+    }
+
+    const reverseQty = Number(transfer.quantity);
+
+    // Destination branch must have sufficient inventory to reverse
+    const destItem = await tx.inventoryItem.findUnique({
+      where: {
+        branchId_ingredientId: { branchId: transfer.destBranchId, ingredientId: transfer.ingredientId },
+      },
+    });
+
+    if (!destItem || Number(destItem.quantity) < reverseQty) {
+      throw {
+        statusCode: 400,
+        message: `Cannot cancel transfer: Destination branch (${transfer.destBranch.name}) does not have sufficient stock (${destItem ? Number(destItem.quantity) : 0} ${transfer.unit}) to reverse ${reverseQty} ${transfer.unit}.`,
+      };
+    }
+
+    const sourceItem = await tx.inventoryItem.findUnique({
+      where: {
+        branchId_ingredientId: { branchId: transfer.sourceBranchId, ingredientId: transfer.ingredientId },
+      },
+    });
+
+    if (!sourceItem) {
+      throw { statusCode: 400, message: `Source inventory item does not exist in branch #${transfer.sourceBranchId}.` };
+    }
+
+    const newDestQty = roundDecimals(Number(destItem.quantity) - reverseQty, 3);
+    const newSourceQty = roundDecimals(Number(sourceItem.quantity) + reverseQty, 3);
+
+    await tx.inventoryItem.update({
+      where: { id: destItem.id },
+      data: { quantity: newDestQty },
+    });
+
+    await tx.inventoryItem.update({
+      where: { id: sourceItem.id },
+      data: { quantity: newSourceQty },
+    });
+
+    await tx.inventoryAuditLog.create({
+      data: {
+        inventoryItemId: destItem.id,
+        actionType: 'TRANSFER_OUT',
+        quantityBefore: Number(destItem.quantity),
+        quantityAfter: newDestQty,
+        quantityChanged: -reverseQty,
+        referenceNo: transfer.transferNo,
+        note: `Reversal of cancelled transfer ${transfer.transferNo}`,
+        actorUserId: requestingUser.id,
+      },
+    });
+
+    await tx.inventoryAuditLog.create({
+      data: {
+        inventoryItemId: sourceItem.id,
+        actionType: 'TRANSFER_IN',
+        quantityBefore: Number(sourceItem.quantity),
+        quantityAfter: newSourceQty,
+        quantityChanged: reverseQty,
+        referenceNo: transfer.transferNo,
+        note: `Restoration of cancelled transfer ${transfer.transferNo}`,
+        actorUserId: requestingUser.id,
+      },
+    });
+
+    const updatedTransfer = await tx.inventoryTransfer.update({
+      where: { id: trfId },
+      data: { status: 'CANCELLED' },
+      include: {
+        sourceBranch: { select: { id: true, name: true } },
+        destBranch: { select: { id: true, name: true } },
+        ingredient: { select: { id: true, name: true, unit: true, gramsPerUnit: true } },
+        actor: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    const sourceTransition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: sourceItem.id,
+      branchId: transfer.sourceBranchId,
+      newQuantity: newSourceQty,
+      minThreshold: sourceItem.minThreshold,
+      itemName: transfer.ingredient?.name,
+      branchName: transfer.sourceBranch?.name,
+      unit: transfer.ingredient?.unit,
+    });
+
+    const destTransition = await notificationService.evaluateAndClaimTransition(tx, {
+      inventoryItemId: destItem.id,
+      branchId: transfer.destBranchId,
+      newQuantity: newDestQty,
+      minThreshold: destItem.minThreshold,
+      itemName: transfer.ingredient?.name,
+      branchName: transfer.destBranch?.name,
+      unit: transfer.ingredient?.unit,
+    });
+
+    return { transfer: updatedTransfer, transitions: [sourceTransition, destTransition] };
+  });
+
+  await notificationService.processTransitionsSafely(result.transitions);
+  return result.transfer;
 }
 
 async function inspectInventoryDependencies(db, inventoryItemId, requestingUser, expectedBranchId) {
@@ -1515,6 +1728,7 @@ module.exports = {
   seedBranchInventory,
   getAuditLogs,
   transferInventory,
+  cancelTransfer,
   getTransfers,
   getInventoryItemDependencies,
   deleteInventoryItem,

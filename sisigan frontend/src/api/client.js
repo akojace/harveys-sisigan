@@ -134,6 +134,7 @@ export const inventoryApi = {
     const q = new URLSearchParams(params).toString()
     return request(`/inventory/transfers${q ? '?' + q : ''}`)
   },
+  cancelTransfer: (id) => request(`/inventory/transfers/${id}/cancel`, { method: 'POST' }),
   dependencies: (id, branchId) =>
     request(`/inventory/${id}/dependencies${branchId ? `?branchId=${branchId}` : ''}`),
   remove: (id, branchId) =>
