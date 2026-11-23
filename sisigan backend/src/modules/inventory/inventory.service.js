@@ -24,6 +24,57 @@ function startAndEndOfDay(date = new Date()) {
 }
 
 /**
+ * Automatically resolves the gram conversion factor for an ingredient.
+ * Priority 1: Explicit Ingredient.gramsPerUnit (configured by administrator)
+ * Priority 2: Existing Recipe BOM requirement (menu_item_recipes) where ingredient is portioned in GRAM or KG
+ * Returns: { gramsPerUnit: number | null, source: 'CONFIGURED' | 'RECIPE' | 'NONE', description: string | null }
+ */
+function resolveIngredientGramConversion(ingredient) {
+  if (!ingredient) {
+    return { gramsPerUnit: null, source: 'NONE', description: null };
+  }
+
+  // Priority 1: Explicit administrator configuration
+  if (ingredient.gramsPerUnit != null && Number(ingredient.gramsPerUnit) > 0) {
+    const gpu = roundDecimals(Number(ingredient.gramsPerUnit), 3);
+    return {
+      gramsPerUnit: gpu,
+      source: 'CONFIGURED',
+      description: `${gpu.toLocaleString()} g per order (configured)`,
+    };
+  }
+
+  // Priority 2: Automatically identify from existing recipe BOM (menu_item_recipes)
+  if (Array.isArray(ingredient.recipes) && ingredient.recipes.length > 0) {
+    // Look for recipes using GRAM or KG
+    const gramRecipes = ingredient.recipes.filter((r) => {
+      const u = r.unit || ingredient.unit;
+      return (u === 'GRAM' || u === 'KG') && Number(r.quantity) > 0;
+    });
+
+    if (gramRecipes.length > 0) {
+      const rep = gramRecipes[0];
+      const u = rep.unit || ingredient.unit;
+      const portionGrams = u === 'KG' ? roundDecimals(Number(rep.quantity) * 1000, 3) : roundDecimals(Number(rep.quantity), 3);
+      if (portionGrams > 0) {
+        const menuName = rep.menuItem?.name ? `recipe for ${rep.menuItem.name}` : 'recipe BOM';
+        return {
+          gramsPerUnit: portionGrams,
+          source: 'RECIPE',
+          description: `${portionGrams.toLocaleString()} g per order (from ${menuName})`,
+        };
+      }
+    }
+  }
+
+  return {
+    gramsPerUnit: null,
+    source: 'NONE',
+    description: null,
+  };
+}
+
+/**
  * Get inventory items for branch with valuation, alerts, and search.
  */
 async function getInventory({ branchId, lowOnly = false, search = '' }, requestingUser) {
@@ -54,6 +105,13 @@ async function getInventory({ branchId, lowOnly = false, search = '' }, requesti
           defaultPrice: true,
           yieldPercentage: true,
           gramsPerUnit: true,
+          recipes: {
+            select: {
+              quantity: true,
+              unit: true,
+              menuItem: { select: { id: true, name: true } },
+            },
+          },
         },
       },
     },
@@ -71,12 +129,15 @@ async function getInventory({ branchId, lowOnly = false, search = '' }, requesti
         : 0;
 
     const inventoryValue = roundDecimals(qty * unitPrice, 2);
+    const conv = resolveIngredientGramConversion(row.ingredient);
 
     return {
       ...row,
       ingredient: {
         ...row.ingredient,
-        gramsPerUnit: row.ingredient?.gramsPerUnit != null ? Number(row.ingredient.gramsPerUnit) : null,
+        gramsPerUnit: conv.gramsPerUnit,
+        conversionSource: conv.source,
+        conversionDescription: conv.description,
       },
       quantity: roundDecimals(qty, 3),
       minThreshold: roundDecimals(min, 3),
@@ -1195,19 +1256,35 @@ async function transferInventory(payload, requestingUser) {
   const [sourceBranch, destBranch, ingredient] = await Promise.all([
     prisma.branch.findUnique({ where: { id: sBranchId } }),
     prisma.branch.findUnique({ where: { id: dBranchId } }),
-    prisma.ingredient.findUnique({ where: { id: ingId } }),
+    prisma.ingredient.findUnique({
+      where: { id: ingId },
+      include: {
+        recipes: {
+          select: {
+            quantity: true,
+            unit: true,
+            menuItem: { select: { id: true, name: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   if (!sourceBranch || !sourceBranch.isActive) throw { statusCode: 404, message: 'Source branch not found or inactive.' };
   if (!destBranch || !destBranch.isActive) throw { statusCode: 404, message: 'Destination branch not found or inactive.' };
   if (!ingredient) throw { statusCode: 404, message: 'Ingredient not found.' };
 
-  const configuredGpu = ingredient.gramsPerUnit != null ? Number(ingredient.gramsPerUnit) : null;
-  if (configuredGpu !== null && (Number.isNaN(configuredGpu) || configuredGpu <= 0)) {
-    throw { statusCode: 400, message: 'Configured conversion factor for this ingredient is invalid.' };
-  }
+  const conv = resolveIngredientGramConversion(ingredient);
+  const conversionFactor = conv.gramsPerUnit;
+  const isGramItem = ingredient.unit === 'GRAM' || ingredient.unit === 'KG';
+  const isGramConverted = conversionFactor !== null && conversionFactor > 0;
 
-  const isGramConverted = configuredGpu !== null && configuredGpu > 0;
+  if (isGramItem && !isGramConverted) {
+    throw {
+      statusCode: 400,
+      message: `Ingredient "${ingredient.name}" does not have a configured gram conversion factor or recipe requirement. An administrator must configure it before transferring by orders.`,
+    };
+  }
 
   let userEnteredUnits = null;
   let snapInputUnit = null;
@@ -1218,23 +1295,22 @@ async function transferInventory(payload, requestingUser) {
   if (isGramConverted) {
     // Formula: Calculated Total Grams = Transfer Quantity × Grams per Unit
     userEnteredUnits = rawEnteredQty;
-    snapInputUnit = inputUnit || 'UNITS';
-    conversionFactorSnapshot = configuredGpu;
+    snapInputUnit = inputUnit || 'ORDERS';
+    conversionFactorSnapshot = conversionFactor;
 
-    const calculatedGrams = roundDecimals(userEnteredUnits * configuredGpu, 3);
+    const calculatedGrams = roundDecimals(userEnteredUnits * conversionFactor, 3);
     if (calculatedGrams <= 0) {
       throw { statusCode: 400, message: 'Calculated transfer weight must be greater than 0.' };
     }
 
     if (ingredient.unit === 'KG') {
       baseQuantity = roundDecimals(calculatedGrams / 1000, 3);
-    } else if (ingredient.unit === 'GRAM') {
-      baseQuantity = calculatedGrams;
     } else {
       baseQuantity = calculatedGrams;
     }
 
-    transferDesc = `${userEnteredUnits} ${snapInputUnit} (${calculatedGrams.toLocaleString()} g @ ${configuredGpu} g/unit)`;
+    const unitLabel = snapInputUnit?.toLowerCase().includes('order') ? 'order' : 'unit';
+    transferDesc = `${userEnteredUnits} ${snapInputUnit} (${calculatedGrams.toLocaleString()} g @ ${conversionFactor} g/${unitLabel})`;
   } else {
     // Check if client tried to use unit-based gram conversion on an unconfigured item
     if (inputQuantity !== undefined && inputQuantity !== null && inputUnit && inputUnit !== ingredient.unit) {

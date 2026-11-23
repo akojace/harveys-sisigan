@@ -543,4 +543,140 @@ describe("Harvey's Sisigan — Automated Gram Conversion for Branch Transfers Te
     });
     assert.equal(Number(finalSource.quantity), 0);
   });
+
+  it('12. Recipe-Derived Conversion Factor: Automatically retrieves portion from recipe BOM when gramsPerUnit is null', async () => {
+    // Create an ingredient with gramsPerUnit = null
+    const recipeItem = await prisma.ingredient.upsert({
+      where: { name: 'Automated Recipe BOM Meat (Null GPU)' },
+      update: { gramsPerUnit: null, unit: 'GRAM', category: 'MAIN_INGREDIENT', defaultPrice: 0.50 },
+      create: {
+        name: 'Automated Recipe BOM Meat (Null GPU)',
+        category: 'MAIN_INGREDIENT',
+        unit: 'GRAM',
+        gramsPerUnit: null,
+        defaultPrice: 0.50,
+      },
+    });
+
+    // Find any existing menu item
+    let menuItem = await prisma.menuItem.findFirst();
+    if (!menuItem) {
+      const cat = await prisma.category.findFirst() || await prisma.category.create({ data: { name: 'Test Cat' } });
+      menuItem = await prisma.menuItem.create({
+        data: { name: 'Test Sisig Plate', categoryId: cat.id, price: 120 },
+      });
+    }
+
+    // Link a recipe BOM with 100g per order
+    const recipeLink = await prisma.menuItemRecipeIngredient.create({
+      data: {
+        menuItemId: menuItem.id,
+        ingredientId: recipeItem.id,
+        quantity: 100,
+        unit: 'GRAM',
+      },
+    });
+
+    // Seed stock: 3,000 g in Branch A
+    await prisma.inventoryItem.upsert({
+      where: { branchId_ingredientId: { branchId: branchA.id, ingredientId: recipeItem.id } },
+      update: { quantity: 3000, price: 0.50 },
+      create: { branchId: branchA.id, ingredientId: recipeItem.id, quantity: 3000, price: 0.50 },
+    });
+
+    let transfer;
+    try {
+      // Transfer 10 orders -> automatically converts to 1,000 g using recipe BOM!
+      transfer = await inventoryService.transferInventory(
+        {
+          sourceBranchId: branchA.id,
+          destBranchId: branchB.id,
+          ingredientId: recipeItem.id,
+          inputQuantity: 10,
+          inputUnit: 'ORDERS',
+          notes: 'Transfer 10 orders using recipe BOM',
+        },
+        ownerUser
+      );
+
+      assert.ok(transfer);
+
+      assert.equal(Number(transfer.inputQuantity), 10);
+      assert.equal(Number(transfer.conversionFactor), 100);
+      assert.equal(Number(transfer.quantity), 1000);
+      assert.equal(transfer.unit, 'GRAM');
+
+      // Verify stock in source: 3,000 - 1,000 = 2,000 g
+      const updatedSource = await prisma.inventoryItem.findUnique({
+        where: { branchId_ingredientId: { branchId: branchA.id, ingredientId: recipeItem.id } },
+      });
+      assert.equal(Number(updatedSource.quantity), 2000);
+    } finally {
+      // Cleanup recipe link, transfers, and test ingredient
+      await prisma.menuItemRecipeIngredient.delete({ where: { id: recipeLink.id } });
+      if (transfer?.transferNo) {
+        await prisma.inventoryAuditLog.deleteMany({
+          where: { referenceNo: transfer.transferNo },
+        });
+      }
+      await prisma.inventoryTransfer.deleteMany({
+        where: { ingredientId: recipeItem.id },
+      });
+      await prisma.inventoryAuditLog.deleteMany({
+        where: { inventoryItem: { ingredientId: recipeItem.id } },
+      });
+      await prisma.inventoryItem.deleteMany({ where: { ingredientId: recipeItem.id } });
+      await prisma.ingredient.delete({ where: { id: recipeItem.id } });
+    }
+  });
+
+  it('13. Unconfigured Gram Item Protection: Blocks transfer if gram item has neither gramsPerUnit nor recipe BOM', async () => {
+    // Create an ingredient with gramsPerUnit = null and NO recipes
+    const unconfiguredItem = await prisma.ingredient.upsert({
+      where: { name: 'Automated Unconfigured Gram Item' },
+      update: { gramsPerUnit: null, unit: 'GRAM', category: 'MAIN_INGREDIENT', defaultPrice: 0.30 },
+      create: {
+        name: 'Automated Unconfigured Gram Item',
+        category: 'MAIN_INGREDIENT',
+        unit: 'GRAM',
+        gramsPerUnit: null,
+        defaultPrice: 0.30,
+      },
+    });
+
+    // Seed stock: 2,000 g in Branch A
+    await prisma.inventoryItem.upsert({
+      where: { branchId_ingredientId: { branchId: branchA.id, ingredientId: unconfiguredItem.id } },
+      update: { quantity: 2000, price: 0.30 },
+      create: { branchId: branchA.id, ingredientId: unconfiguredItem.id, quantity: 2000, price: 0.30 },
+    });
+
+    try {
+      await assert.rejects(
+        async () => {
+          await inventoryService.transferInventory(
+            {
+              sourceBranchId: branchA.id,
+              destBranchId: branchB.id,
+              ingredientId: unconfiguredItem.id,
+              inputQuantity: 10,
+              inputUnit: 'ORDERS',
+            },
+            ownerUser
+          );
+        },
+        (err) => {
+          assert.equal(err.statusCode, 400);
+          assert.match(err.message, /does not have a configured gram conversion factor or recipe requirement/i);
+          return true;
+        }
+      );
+    } finally {
+      await prisma.inventoryAuditLog.deleteMany({
+        where: { inventoryItem: { ingredientId: unconfiguredItem.id } },
+      });
+      await prisma.inventoryItem.deleteMany({ where: { ingredientId: unconfiguredItem.id } });
+      await prisma.ingredient.delete({ where: { id: unconfiguredItem.id } });
+    }
+  });
 });

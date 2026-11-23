@@ -378,12 +378,18 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
   const selectedItem = availableItems.find((i) => Number(i.ingredientId) === Number(ingredientId))
   const unit = selectedItem?.ingredient?.unit || 'GRAM'
   const gpu = selectedItem?.ingredient?.gramsPerUnit ? Number(selectedItem.ingredient.gramsPerUnit) : null
+  const conversionSource = selectedItem?.ingredient?.conversionSource
+  const conversionDesc = selectedItem?.ingredient?.conversionDescription
+  const isGramItem = unit === 'GRAM' || unit === 'KG'
   const isGramConverted = gpu !== null && gpu > 0
+  const isMissingConversion = isGramItem && !isGramConverted
 
   const enteredQty = Number(quantity) || 0
   const calculatedGrams = isGramConverted ? Math.round(enteredQty * gpu * 1000) / 1000 : null
   const availableStock = selectedItem ? Number(selectedItem.quantity) : 0
-  const requiredStock = isGramConverted ? calculatedGrams : enteredQty
+  const requiredStock = isGramConverted
+    ? (unit === 'KG' ? calculatedGrams / 1000 : calculatedGrams)
+    : enteredQty
   const isOverStock = selectedItem && enteredQty > 0 && requiredStock > availableStock
 
   // Destination branches (exclude source)
@@ -395,6 +401,10 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
       setError('Please fill in all required fields.')
       return
     }
+    if (isMissingConversion) {
+      setError(`Cannot transfer "${selectedItem?.ingredient?.name}": No conversion configuration found. An administrator must configure grams per order under Item Settings before transfers can be processed.`)
+      return
+    }
     const q = Number(quantity)
     if (isNaN(q) || q <= 0) {
       setError('Quantity must be greater than zero.')
@@ -403,7 +413,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
     if (isOverStock) {
       setError(
         isGramConverted
-          ? `Cannot transfer ${calculatedGrams.toLocaleString()} g (${enteredQty.toLocaleString()} units). Only ${availableStock.toLocaleString()} g available in source branch.`
+          ? `Cannot transfer ${calculatedGrams.toLocaleString()} g (${enteredQty.toLocaleString()} orders). Only ${availableStock.toLocaleString()} ${unit} available in source branch.`
           : `Cannot transfer ${enteredQty} ${unit}. Only ${availableStock.toFixed(2)} ${unit} available in source branch.`
       )
       return
@@ -421,7 +431,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
 
       if (isGramConverted) {
         payload.inputQuantity = q
-        payload.inputUnit = 'UNITS'
+        payload.inputUnit = 'ORDERS'
         payload.quantity = q
         payload.unit = 'GRAM'
       } else {
@@ -433,7 +443,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
 
       setSuccess(
         isGramConverted
-          ? `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q.toLocaleString()} units (${calculatedGrams.toLocaleString()} g).`
+          ? `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q.toLocaleString()} orders (${calculatedGrams.toLocaleString()} g).`
           : `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q} ${unit}.`
       )
       setTimeout(() => {
@@ -449,8 +459,8 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
   return (
     <Modal title="Inter-Branch Inventory Transfer" onClose={onClose} width={540}>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {error && <div style={{ color: 'var(--red)', fontSize: 13 }}>{error}</div>}
-        {success && <div style={{ color: 'var(--green-dark)', fontSize: 13, fontWeight: 700 }}>{success}</div>}
+        {error && <div style={{ color: 'var(--red)', fontSize: 13, background: 'var(--red-light)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>{error}</div>}
+        {success && <div style={{ color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, background: 'var(--green-light)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>{success}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
@@ -488,16 +498,24 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
           <label style={lbl}>Ingredient to Transfer *</label>
           <select
             value={ingredientId}
-            onChange={(e) => setIngredientId(e.target.value)}
+            onChange={(e) => { setIngredientId(e.target.value); setError(''); }}
             style={selectStyle}
             required
           >
             <option value="">Select available ingredient...</option>
             {availableItems.map((item) => {
               const itemGpu = item.ingredient?.gramsPerUnit ? Number(item.ingredient.gramsPerUnit) : null
+              const itemUnit = item.ingredient?.unit
+              const isGram = itemUnit === 'GRAM' || itemUnit === 'KG'
+              let badge = ''
+              if (itemGpu) {
+                badge = `(⚖️ ${itemGpu.toLocaleString()} g/order)`
+              } else if (isGram) {
+                badge = '(⚠️ No conversion factor)'
+              }
               return (
                 <option key={item.id} value={item.ingredientId}>
-                  {item.ingredient?.name} {itemGpu ? `(⚖️ ${itemGpu} g/unit)` : ''} — Stock: {Number(item.quantity).toFixed(2)} {item.ingredient?.unit} @ ₱{Number(item.price || item.unitCost || 0).toFixed(2)}
+                  {item.ingredient?.name} {badge} — Stock: {Number(item.quantity).toLocaleString()} {itemUnit} @ ₱{Number(item.price || item.unitCost || 0).toFixed(2)}
                 </option>
               )
             })}
@@ -509,29 +527,50 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
           )}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: isGramConverted ? '1fr' : '2fr 1fr', gap: 12 }}>
-          <Input
-            label={isGramConverted ? 'Transfer Quantity (Units / Orders) *' : `Transfer Quantity (${unit}) *`}
-            type="number"
-            step="any"
-            min="0.001"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            placeholder={isGramConverted ? 'e.g. 10' : 'e.g. 500'}
-            required
-          />
-          {!isGramConverted && (
-            <div>
-              <label style={lbl}>Unit</label>
-              <input
-                type="text"
-                value={unit}
-                disabled
-                style={{ ...selectStyle, background: 'var(--brown-50)', color: 'var(--text-dark)', cursor: 'default' }}
-              />
+        {isMissingConversion && (
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1.5px solid var(--red)',
+              borderRadius: 'var(--radius-md)',
+              padding: '14px 16px',
+              color: 'var(--red-dark)',
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>⚠️ No conversion configuration found for &quot;{selectedItem?.ingredient?.name}&quot;.</strong>
+            <div style={{ marginTop: 4 }}>
+              An administrator must configure grams per order under Item Settings before transfers can be processed.
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {(!isGramItem || isGramConverted) && (
+          <div style={{ display: 'grid', gridTemplateColumns: isGramConverted ? '1fr' : '2fr 1fr', gap: 12 }}>
+            <Input
+              label={isGramConverted ? 'Transfer Quantity (Orders) *' : `Transfer Quantity (${unit}) *`}
+              type="number"
+              step="any"
+              min="0.001"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder={isGramConverted ? 'Enter number of orders (e.g. 10)' : 'e.g. 500'}
+              required
+            />
+            {!isGramConverted && (
+              <div>
+                <label style={lbl}>Unit</label>
+                <input
+                  type="text"
+                  value={unit}
+                  disabled
+                  style={{ ...selectStyle, background: 'var(--brown-50)', color: 'var(--text-dark)', cursor: 'default' }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {isGramConverted && (
           <div
@@ -542,43 +581,45 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
               padding: '14px 16px',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
               <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--brown-900)' }}>
-                ⚖️ Automated Gram Conversion Details
+                ⚖️ Automated Gram Calculation
               </span>
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                Conversion: <strong>{gpu.toLocaleString()} g/unit</strong>
+              <span style={{ fontSize: 12, color: 'var(--brown-800)', background: '#faebd7', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
+                Automatically retrieved: {conversionDesc || `${gpu.toLocaleString()} grams per order`}
               </span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '8px 0' }}>
-              <div style={{ background: '#fff', padding: '8px', borderRadius: 6, border: '1px solid #ebd3ba', textAlign: 'center' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Grams per unit</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '10px 0' }}>
+              <div style={{ background: '#fff', padding: '10px 8px', borderRadius: 6, border: '1px solid #ebd3ba', textAlign: 'center' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Grams per order</div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brown-900)', marginTop: 2 }}>{gpu.toLocaleString()} g</div>
               </div>
-              <div style={{ background: '#fff', padding: '8px', borderRadius: 6, border: '1px solid #ebd3ba', textAlign: 'center' }}>
-                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Quantity entered</div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brown-900)', marginTop: 2 }}>{enteredQty.toLocaleString()} units</div>
+              <div style={{ background: '#fff', padding: '10px 8px', borderRadius: 6, border: '1px solid #ebd3ba', textAlign: 'center' }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Orders entered</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brown-900)', marginTop: 2 }}>{enteredQty.toLocaleString()} orders</div>
               </div>
-              <div style={{ background: '#fff', padding: '8px', borderRadius: 6, border: `1.5px solid ${isOverStock ? 'var(--red)' : 'var(--brown-600)'}`, textAlign: 'center' }}>
-                <div style={{ fontSize: 10.5, color: isOverStock ? 'var(--red)' : 'var(--brown-700)', textTransform: 'uppercase', fontWeight: 700 }}>Calculated weight</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: isOverStock ? 'var(--red)' : 'var(--brown-900)', marginTop: 2 }}>
-                  {calculatedGrams.toLocaleString()} g
+              <div style={{ background: '#fff', padding: '10px 8px', borderRadius: 6, border: `1.5px solid ${isOverStock ? 'var(--red)' : 'var(--brown-600)'}`, textAlign: 'center' }}>
+                <div style={{ fontSize: 10.5, color: isOverStock ? 'var(--red)' : 'var(--brown-700)', textTransform: 'uppercase', fontWeight: 700 }}>Total Grams (Read-Only)</div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: isOverStock ? 'var(--red)' : 'var(--brown-900)', marginTop: 2 }}>
+                  {calculatedGrams != null ? `${calculatedGrams.toLocaleString()} g` : '0 g'}
                 </div>
               </div>
             </div>
 
             {isOverStock ? (
-              <div style={{ color: 'var(--red-dark)', fontSize: 12.5, fontWeight: 600, marginTop: 4 }}>
-                ⚠️ Transfer exceeds available source stock ({availableStock.toLocaleString()} g available).
+              <div style={{ color: 'var(--red-dark)', fontSize: 12.5, fontWeight: 600, marginTop: 6 }}>
+                ⚠️ Transfer exceeds available source stock ({availableStock.toLocaleString()} {unit} available).
               </div>
             ) : enteredQty > 0 ? (
-              <div style={{ color: 'var(--green-dark)', fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+              <div style={{ color: 'var(--green-dark)', fontSize: 12, fontWeight: 600, marginTop: 6 }}>
+                ✓ Formula: {enteredQty.toLocaleString()} orders × {gpu.toLocaleString()} g = <strong>{calculatedGrams.toLocaleString()} g</strong>
+                <br />
                 ✓ Source loses <strong>{calculatedGrams.toLocaleString()} g</strong>; Destination receives <strong>{calculatedGrams.toLocaleString()} g</strong>.
               </div>
             ) : (
-              <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
-                Enter transfer quantity in units to calculate total grams automatically.
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>
+                Enter transfer quantity in orders above. Total grams will be calculated automatically.
               </div>
             )}
           </div>
@@ -593,7 +634,11 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={loading || !destBranchId || !ingredientId || !quantity || isOverStock}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={loading || !destBranchId || !ingredientId || !quantity || isOverStock || isMissingConversion}
+          >
             {loading ? 'Transferring...' : 'Confirm Transfer'}
           </Button>
         </div>
