@@ -1,5 +1,11 @@
 // src/api/client.js - UPDATED
 // Centralized API helper — all backend calls go through here
+import {
+  getCachedMenu,
+  setCachedMenu,
+  hasMenuChanged,
+  clearMenuCache,
+} from '../services/menuCacheService'
 
 const BASE = `${import.meta.env.VITE_BACKEND_URL}/api`
 
@@ -34,23 +40,123 @@ export const authApi = {
 // ── Menu ──────────────────────────────────────────────────
 export const menuApi = {
   categories: (params = {}) => {
-  const q = new URLSearchParams(params).toString()
-  return request(`/menu/categories${q ? '?' + q : ''}`)
-},
+    const q = new URLSearchParams(params).toString()
+    return request(`/menu/categories${q ? '?' + q : ''}`)
+  },
+
+  /**
+   * Cache-First Menu Loader with Stale-While-Revalidate background synchronization.
+   * Immediately yields local IndexedDB snapshot (0s latency even if Render is sleeping).
+   * Concurrently performs background network refresh and notifies on updates.
+   */
+  categoriesCacheFirst: async (params = {}, { onBackgroundUpdate, onStatusChange } = {}) => {
+    // 1. Immediately read from persistent local cache
+    const cached = await getCachedMenu(params)
+    const hasValidCache = Boolean(cached && Array.isArray(cached.data) && cached.data.length > 0)
+
+    if (hasValidCache && onStatusChange) {
+      onStatusChange({
+        status: 'cached',
+        timestamp: cached.timestamp,
+        isBackgroundSyncing: true,
+      })
+    }
+
+    // 2. Background network synchronization promise
+    const networkPromise = (async () => {
+      try {
+        const q = new URLSearchParams(params).toString()
+        const freshRes = await request(`/menu/categories${q ? '?' + q : ''}`)
+        const freshData = freshRes.data || []
+
+        // Persist to local IndexedDB storage
+        await setCachedMenu(params, freshData)
+
+        // Check if data actually changed
+        const changed = !hasValidCache || hasMenuChanged(cached.data, freshData)
+        if (changed && onBackgroundUpdate) {
+          onBackgroundUpdate(freshData)
+        }
+
+        if (onStatusChange) {
+          onStatusChange({
+            status: 'synced',
+            timestamp: Date.now(),
+            isBackgroundSyncing: false,
+            changed,
+          })
+        }
+
+        return { data: freshData, fromCache: false, changed }
+      } catch (err) {
+        if (onStatusChange) {
+          onStatusChange({
+            status: hasValidCache ? 'offline' : 'error',
+            isBackgroundSyncing: false,
+            error: err.message,
+          })
+        }
+        if (!hasValidCache) {
+          throw err
+        }
+        // If we already returned cached data, continue serving it smoothly
+        return { data: cached.data, fromCache: true, offline: true }
+      }
+    })()
+
+    // If cache is ready, return it immediately so the UI renders without blocking!
+    if (hasValidCache) {
+      return {
+        data: cached.data,
+        fromCache: true,
+        timestamp: cached.timestamp,
+        networkPromise,
+      }
+    }
+
+    // First-time install: wait for initial network response
+    return await networkPromise
+  },
+
   all:        ()           => request('/menu'),
-  create:     (data)       => request('/menu',            { method: 'POST',  body: JSON.stringify(data) }),
-  update:     (id, data)   => request(`/menu/${id}`,      { method: 'PATCH', body: JSON.stringify(data) }),
-  toggle:     (id, data = {}) => request(`/menu/${id}/toggle`, { method: 'PATCH', body: JSON.stringify(data) }),
+  create:     async (data) => {
+    const res = await request('/menu', { method: 'POST', body: JSON.stringify(data) })
+    await clearMenuCache()
+    return res
+  },
+  update:     async (id, data) => {
+    const res = await request(`/menu/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+    await clearMenuCache()
+    return res
+  },
+  toggle:     async (id, data = {}) => {
+    const res = await request(`/menu/${id}/toggle`, { method: 'PATCH', body: JSON.stringify(data) })
+    await clearMenuCache(data.branchId)
+    return res
+  },
   getRecipe: (id) => request(`/menu/${id}/recipe`),
-  addRecipeIngredient: (id, data) => request(`/menu/${id}/recipe`, { method: 'POST', body: JSON.stringify(data) }),
-  removeRecipeIngredient: (id, ingId) => request(`/menu/${id}/recipe/${ingId}`, { method: 'DELETE' }),
-  setRecipe: (id, data) => request(`/menu/${id}/recipe`, { method: 'PUT', body: JSON.stringify(data) }),
+  addRecipeIngredient: async (id, data) => {
+    const res = await request(`/menu/${id}/recipe`, { method: 'POST', body: JSON.stringify(data) })
+    await clearMenuCache()
+    return res
+  },
+  removeRecipeIngredient: async (id, ingId) => {
+    const res = await request(`/menu/${id}/recipe/${ingId}`, { method: 'DELETE' })
+    await clearMenuCache()
+    return res
+  },
+  setRecipe: async (id, data) => {
+    const res = await request(`/menu/${id}/recipe`, { method: 'PUT', body: JSON.stringify(data) })
+    await clearMenuCache()
+    return res
+  },
   checkStock: (id, branchId) => request(`/menu/${id}/stock-check?branchId=${branchId}`),
   availability: (id, params = {}) => {
     const q = new URLSearchParams(params).toString()
     return request(`/menu/${id}/availability${q ? '?' + q : ''}`)
   },
   matrix: () => request('/menu/matrix'),
+  clearCache: clearMenuCache,
 }
 
 // ── Branches ──────────────────────────────────────────────

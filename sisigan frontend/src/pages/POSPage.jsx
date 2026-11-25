@@ -16,6 +16,11 @@ const kioskStyles = `
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
 
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
   html, body, #root { height: 100%; overflow: hidden; }
 
   .kiosk-shell {
@@ -537,6 +542,10 @@ export default function POSPage() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false) // tablet/mobile drawer visibility
   const toastTimer = useRef(null)
 
+  // ADDED — Offline-first persistent cache state
+  const [syncState, setSyncState] = useState(null)
+  const [isMenuLoading, setIsMenuLoading] = useState(false)
+
   const isOwner = user?.role === 'OWNER'
   const userBranchId = getUserBranchId(user)
   const [branches, setBranches] = useState([])
@@ -575,12 +584,64 @@ export default function POSPage() {
   }
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
 
-  // Branch-scoped menu loading with live stock evaluation
+  // Branch-scoped menu loading with persistent cache-first instant loading
   const loadMenu = useCallback(() => {
     if (!branchId) return
-    menuApi.categories({ branchId, includePhoto: true, enforceStock: false }).then(d => {
-      setMenu(d.data || [])
-      if (d.data?.length) setActiveCategory(prev => prev ?? d.data[0].id)
+    setIsMenuLoading(true)
+    menuApi.categoriesCacheFirst(
+      { branchId, includePhoto: true, enforceStock: false },
+      {
+        onStatusChange: (status) => {
+          setSyncState({
+            status: status.status,
+            isBackgroundSyncing: status.isBackgroundSyncing,
+            lastSync: status.timestamp || Date.now(),
+          })
+          if (!status.isBackgroundSyncing) {
+            setIsMenuLoading(false)
+          }
+        },
+        onBackgroundUpdate: (freshMenu) => {
+          setMenu(freshMenu || [])
+          if (freshMenu?.length) {
+            setActiveCategory(prev => (freshMenu.some(c => c.id === prev) ? prev : freshMenu[0].id))
+          }
+          // Validate & sync cart prices against fresh server data
+          const itemMap = new Map()
+          freshMenu.flatMap(c => c.items || []).forEach(item => itemMap.set(item.id, item))
+          setCart(prevCart => {
+            let changed = false
+            const nextCart = prevCart.map(ci => {
+              const freshItem = itemMap.get(ci.id)
+              if (freshItem && Number(freshItem.price) !== Number(ci.price)) {
+                changed = true
+                return { ...ci, price: Number(freshItem.price) }
+              }
+              return ci
+            })
+            if (changed) {
+              showToast('⚠️ Menu prices refreshed from server')
+            }
+            return nextCart
+          })
+          // Invalidate fetched live stock cache so fresh ingredients re-evaluate
+          fetchedIds.current.clear()
+        },
+      }
+    ).then(res => {
+      setMenu(res.data || [])
+      if (res.data?.length) setActiveCategory(prev => prev ?? res.data[0].id)
+      setSyncState({
+        status: res.fromCache ? (res.networkPromise ? 'syncing' : 'cached') : 'synced',
+        isBackgroundSyncing: !!res.networkPromise,
+        lastSync: res.timestamp || Date.now(),
+      })
+      if (!res.networkPromise) {
+        setIsMenuLoading(false)
+      }
+    }).catch(err => {
+      setIsMenuLoading(false)
+      setError('Failed to load menu: ' + err.message)
     })
   }, [branchId])
 
@@ -1098,6 +1159,38 @@ export default function POSPage() {
             </div>
           ) : null}
 
+          {/* Offline-First Persistent Cache & Sync Status Pill */}
+          {syncState && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              marginRight: 8,
+              padding: '0 14px',
+              height: 44,
+              borderRadius: 'var(--radius-full)',
+              background: syncState.status === 'offline' ? '#fef3c7' : syncState.isBackgroundSyncing ? '#e0f2fe' : '#f0fdf4',
+              color: syncState.status === 'offline' ? '#92400e' : syncState.isBackgroundSyncing ? '#0369a1' : '#15803d',
+              border: `1.5px solid ${syncState.status === 'offline' ? '#fde68a' : syncState.isBackgroundSyncing ? '#bae6fd' : '#bbf7d0'}`,
+              fontSize: 12.5,
+              fontWeight: 700,
+              flexShrink: 0,
+              userSelect: 'none',
+              transition: 'all 0.2s ease',
+            }} title={syncState.lastSync ? `Last synced: ${new Date(syncState.lastSync).toLocaleTimeString()}` : ''}>
+              <span style={{ fontSize: 13, display: 'inline-block', animation: syncState.isBackgroundSyncing ? 'spin 1.5s linear infinite' : 'none' }}>
+                {syncState.status === 'offline' ? '⚡' : syncState.isBackgroundSyncing ? '🔄' : '✓'}
+              </span>
+              <span>
+                {syncState.status === 'offline'
+                  ? 'Offline Cache'
+                  : syncState.isBackgroundSyncing
+                  ? 'Instant Cache · Syncing...'
+                  : 'Menu Synced'}
+              </span>
+            </div>
+          )}
+
           {menu.map(cat => (
             <button
               key={cat.id}
@@ -1113,7 +1206,11 @@ export default function POSPage() {
           <div className="kiosk-grid">
             {currentItems.length === 0 && (
               <div style={{ gridColumn: '1/-1' }}>
-                <EmptyState icon="🍽️" title="No items in this category" />
+                <EmptyState
+                  icon={isMenuLoading ? "⏳" : "🍽️"}
+                  title={isMenuLoading ? "Connecting to server..." : "No items in this category"}
+                  subtitle={isMenuLoading ? "Loading menu catalog (backend waking up)..." : undefined}
+                />
               </div>
             )}
 

@@ -805,6 +805,7 @@ export default function MenuPage() {
   const [showMatrix, setShowMatrix] = useState(false)
   const [toggling,   setToggling]  = useState(null)
   const [search,     setSearch]    = useState('')
+  const [syncState,  setSyncState] = useState(null)
 
   const canEdit = isOwner || user?.role === 'MANAGER'
   const effectiveBranchId = resolveBranchId({ isOwner, selectedBranchId, user, branches })
@@ -833,13 +834,37 @@ export default function MenuPage() {
 
   async function load() {
     if (!effectiveBranchId) return
-    const data = await menuApi.categories({
-      branchId: effectiveBranchId,
-      includeUnavailable: true,
-      enforceStock: false,
-    })
-    setMenu(data.data || [])
-    if (!activeTab && data.data?.length) setActiveTab(data.data[0].id)
+    try {
+      const data = await menuApi.categoriesCacheFirst(
+        {
+          branchId: effectiveBranchId,
+          includeUnavailable: true,
+          enforceStock: false,
+        },
+        {
+          onStatusChange: (status) => {
+            setSyncState({
+              status: status.status,
+              isBackgroundSyncing: status.isBackgroundSyncing,
+              lastSync: status.timestamp || Date.now(),
+            })
+          },
+          onBackgroundUpdate: (freshMenu) => {
+            setMenu(freshMenu || [])
+            if (!activeTab && freshMenu?.length) setActiveTab(freshMenu[0].id)
+          },
+        }
+      )
+      setMenu(data.data || [])
+      if (!activeTab && data.data?.length) setActiveTab(data.data[0].id)
+      setSyncState({
+        status: data.fromCache ? (data.networkPromise ? 'syncing' : 'cached') : 'synced',
+        isBackgroundSyncing: !!data.networkPromise,
+        lastSync: data.timestamp || Date.now(),
+      })
+    } catch (err) {
+      console.error('Menu load error:', err)
+    }
   }
 
   useEffect(() => {
@@ -982,6 +1007,35 @@ export default function MenuPage() {
               📍 {user.branch.name}
             </div>
           ) : null}
+
+          {syncState && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 14px',
+              borderRadius: 'var(--radius-full)',
+              fontSize: 12.5,
+              fontWeight: 600,
+              background: syncState.status === 'offline' ? '#fef3c7' : syncState.isBackgroundSyncing ? '#e0f2fe' : '#f0fdf4',
+              color: syncState.status === 'offline' ? '#92400e' : syncState.isBackgroundSyncing ? '#0369a1' : '#15803d',
+              border: `1px solid ${syncState.status === 'offline' ? '#fde68a' : syncState.isBackgroundSyncing ? '#bae6fd' : '#bbf7d0'}`,
+              flexShrink: 0,
+              userSelect: 'none',
+              transition: 'all 0.2s ease',
+            }} title={syncState.lastSync ? `Last synced: ${new Date(syncState.lastSync).toLocaleTimeString()}` : ''}>
+              <span style={{ fontSize: 13 }}>
+                {syncState.status === 'offline' ? '⚡' : syncState.isBackgroundSyncing ? '🔄' : '✓'}
+              </span>
+              <span>
+                {syncState.status === 'offline'
+                  ? 'Offline Cache Active'
+                  : syncState.isBackgroundSyncing
+                  ? 'Instant Cache · Syncing...'
+                  : 'Menu Synced'}
+              </span>
+            </div>
+          )}
 
           {isOwner && (
             <Button variant="outline" onClick={() => setShowMatrix(true)}>
