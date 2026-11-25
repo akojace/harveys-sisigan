@@ -360,8 +360,11 @@ function AddQuantitySection({ inventory, isOwner, onSaved }) {
   )
 }
 
-function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClose, onSaved }) {
-  const [sourceBranchId, setSourceBranchId] = useState(isOwner ? (branches[0]?.id || '') : userBranchId)
+function TransferStockModal({ isOwner, branches, userBranchId, initialBranchId, inventory, onClose, onSaved }) {
+  const [sourceBranchId, setSourceBranchId] = useState(() => {
+    if (initialBranchId) return String(initialBranchId)
+    return isOwner ? (branches[0]?.id ? String(branches[0].id) : '') : String(userBranchId || '')
+  })
   const [destBranchId, setDestBranchId] = useState('')
   const [ingredientId, setIngredientId] = useState('')
   const [quantity, setQuantity] = useState('')
@@ -370,10 +373,30 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  // Filter available items belonging to source branch
+  // Fetch real-time source branch inventory to eliminate stale filter discrepancies
+  const [branchInventory, setBranchInventory] = useState([])
+  const [loadingBranchInv, setLoadingBranchInv] = useState(false)
+
+  useEffect(() => {
+    if (!sourceBranchId) return
+    let active = true
+    setLoadingBranchInv(true)
+    inventoryApi.list({ branchId: sourceBranchId })
+      .then((res) => {
+        if (active) setBranchInventory(res.data || [])
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoadingBranchInv(false)
+      })
+    return () => { active = false }
+  }, [sourceBranchId])
+
+  // Filter available items belonging to source branch (prefer live source branch inventory)
   const availableItems = useMemo(() => {
-    return inventory.filter((i) => Number(i.branchId) === Number(sourceBranchId) && Number(i.quantity) > 0)
-  }, [inventory, sourceBranchId])
+    const pool = branchInventory.length > 0 ? branchInventory : inventory
+    return pool.filter((i) => Number(i.branchId) === Number(sourceBranchId) && Number(i.quantity) > 0)
+  }, [branchInventory, inventory, sourceBranchId])
 
   const selectedItem = availableItems.find((i) => Number(i.ingredientId) === Number(ingredientId))
   const unit = selectedItem?.ingredient?.unit || 'GRAM'
@@ -555,7 +578,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
         {(!isGramItem || isGramConverted) && (
           <div style={{ display: 'grid', gridTemplateColumns: isGramConverted ? '1fr' : '2fr 1fr', gap: 12 }}>
             <Input
-              label={isGramConverted ? 'Transfer Quantity (Orders) *' : `Transfer Quantity (${unit}) *`}
+              label={isGramConverted ? 'Quantity to Transfer (Orders/Units) *' : `Transfer Quantity (${unit}) *`}
               type="number"
               step="any"
               min="0.001"
@@ -563,7 +586,7 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
               onChange={(e) => setQuantity(e.target.value)}
               placeholder={
                 isGramConverted
-                  ? 'Enter number of orders (e.g. 10)'
+                  ? 'Enter number of orders/units (e.g. 1)'
                   : ['TANK', 'PCS', 'PACK', 'BAG', 'TUB'].includes(unit)
                   ? 'e.g. 1'
                   : 'e.g. 100'
@@ -1176,6 +1199,7 @@ export default function InventoryPage() {
           isOwner={isOwner}
           branches={branches}
           userBranchId={getUserBranchId(user)}
+          initialBranchId={branchId || getUserBranchId(user) || branches[0]?.id}
           inventory={inventory}
           onClose={() => setShowTransfer(false)}
           onSaved={async () => { setShowTransfer(false); await load() }}

@@ -184,6 +184,19 @@ async function autoMigrate(prisma) {
     await ensureIndex(prisma, 'inventory_audit_logs', 'inventory_audit_logs_inventoryItemId_createdAt_idx', '`inventoryItemId`, `createdAt`');
     await ensureIndex(prisma, 'expenses', 'expenses_branchId_expenseDate_idx', '`branchId`, `expenseDate`');
 
+    // Ensure Barkada Meat has the authorized standard conversion factor: 100g per order
+    try {
+      await prisma.$executeRawUnsafe(
+        `UPDATE \`ingredients\` 
+         SET \`gramsPerUnit\` = 100.000 
+         WHERE \`name\` = 'Barkada Meat' 
+           AND (\`gramsPerUnit\` IS NULL OR \`gramsPerUnit\` = 80.000)`
+      );
+      console.log('✅ [AutoMigrate] Verified Barkada Meat gramsPerUnit standard (100g/order).');
+    } catch (bmErr) {
+      console.warn('[AutoMigrate] Notice updating Barkada Meat gramsPerUnit:', bmErr.message);
+    }
+
     console.log('✅ [AutoMigrate] Database schema verified.');
   } catch (err) {
     console.error('❌ [AutoMigrate] Error during schema verification:', err.message);

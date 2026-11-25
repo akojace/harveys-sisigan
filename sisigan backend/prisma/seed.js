@@ -81,9 +81,9 @@ function getInventorySeedItems() {
 
     // MAIN INGREDIENTS
     // Silog Meat: ₱280/kg = ₱0.28 per gram (100g serving = ₱28.00)
-    { name: 'Silog Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 10000, consumptionDays: null, consumptionLabel: '100 grams per serving', price: 0.28 },
-    // Barkada Meat: ₱280/kg = ₱0.28 per gram (200g serving = ₱56.00)
-    { name: 'Barkada Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 20000, consumptionDays: null, consumptionLabel: '200 grams per serving', price: 0.28 },
+    { name: 'Silog Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 10000, consumptionDays: null, consumptionLabel: '100 grams per serving', price: 0.28, gramsPerUnit: 100 },
+    // Barkada Meat: ₱280/kg = ₱0.28 per gram (authorized conversion: 100g per order)
+    { name: 'Barkada Meat', category: 'MAIN_INGREDIENT', unit: 'GRAM', quantity: 20000, consumptionDays: null, consumptionLabel: '100 grams per order', price: 0.28, gramsPerUnit: 100 },
     { name: 'Pizza (Any Flavor)', category: 'MAIN_INGREDIENT', unit: 'PCS', quantity: 18, consumptionDays: null, consumptionLabel: '1 piece per pizza order', price: 35.00 },
 
     // RICE
@@ -120,6 +120,7 @@ async function seedInventoryAndRecipes(branches) {
         defaultDailyDeduction: item.dailyDeduction,
         defaultMinThreshold: item.minThreshold,
         defaultPrice: item.price ?? null,
+        gramsPerUnit: item.gramsPerUnit ?? null,
       },
       create: {
         name: item.name,
@@ -130,6 +131,7 @@ async function seedInventoryAndRecipes(branches) {
         defaultDailyDeduction: item.dailyDeduction,
         defaultMinThreshold: item.minThreshold,
         defaultPrice: item.price ?? null,
+        gramsPerUnit: item.gramsPerUnit ?? null,
       },
     });
   }
