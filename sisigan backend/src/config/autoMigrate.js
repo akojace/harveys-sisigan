@@ -6,6 +6,26 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
 
+async function ensureIndex(prisma, tableName, indexName, columnsSql) {
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT index_name FROM information_schema.statistics 
+       WHERE table_schema = DATABASE() 
+         AND table_name = '${tableName}' 
+         AND index_name = '${indexName}'`
+    );
+    if (!Array.isArray(rows) || rows.length === 0) {
+      console.log(`[AutoMigrate] Adding missing performance index ${indexName} on ${tableName}...`);
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE \`${tableName}\` ADD INDEX \`${indexName}\` (${columnsSql})`
+      );
+      console.log(`✅ [AutoMigrate] Added index ${indexName}`);
+    }
+  } catch (err) {
+    // Gracefully handle existing index or permission notices
+  }
+}
+
 /**
  * Runs pending Prisma migrations using Prisma CLI, with a robust programmatic
  * fallback for additive DDL changes.
@@ -157,6 +177,12 @@ async function autoMigrate(prisma) {
       );
       console.log('✅ [AutoMigrate] Created notification_outbox table');
     }
+
+    // Performance indexes verification
+    await ensureIndex(prisma, 'categories', 'categories_sortOrder_idx', '`sortOrder`');
+    await ensureIndex(prisma, 'orders', 'orders_branchId_createdAt_idx', '`branchId`, `createdAt`');
+    await ensureIndex(prisma, 'inventory_audit_logs', 'inventory_audit_logs_inventoryItemId_createdAt_idx', '`inventoryItemId`, `createdAt`');
+    await ensureIndex(prisma, 'expenses', 'expenses_branchId_expenseDate_idx', '`branchId`, `expenseDate`');
 
     console.log('✅ [AutoMigrate] Database schema verified.');
   } catch (err) {

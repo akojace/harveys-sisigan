@@ -76,6 +76,7 @@ model Category {
   createdAt DateTime   @default(now())
   items     MenuItem[]
 
+  @@index([sortOrder])
   @@map("categories")
 }
 
@@ -130,6 +131,7 @@ model Order {
   @@index([status])
   @@index([createdAt])
   @@index([status, branchId, createdAt])
+  @@index([branchId, createdAt])
   @@map("orders")
 }
 
@@ -273,6 +275,7 @@ model InventoryAuditLog {
   @@index([actionType])
   @@index([createdAt])
   @@index([orderId])
+  @@index([inventoryItemId, createdAt])
   @@map("inventory_audit_logs")
 }
 
@@ -292,6 +295,7 @@ model Expense {
   @@index([branchId])
   @@index([category])
   @@index([expenseDate])
+  @@index([branchId, expenseDate])
   @@map("expenses")
 }
 

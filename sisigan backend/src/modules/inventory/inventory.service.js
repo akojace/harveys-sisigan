@@ -694,7 +694,7 @@ async function createInventoryItem(payload, requestingUser) {
  * @param {Array<{ menuItemId: number, quantity: number, orderItemId?: number }>} params.items
  * @returns {Promise<{ totalOrderCogs: number, itemCogs: Array }>}
  */
-async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
+async function deductInventoryForOrder({ tx, branchId, orderId, orderNumber: passedOrderNumber, items }) {
   const db = tx || prisma;
   const menuItemIds = [...new Set(items.map((i) => Number(i.menuItemId)))];
 
@@ -837,14 +837,18 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
     }
   }
 
-  // Fetch order number for clear audit logging
-  const orderRecord = await db.order.findUnique({
-    where: { id: Number(orderId) },
-    select: { orderNumber: true },
-  });
-  const orderNumber = orderRecord?.orderNumber || `ID#${orderId}`;
+  // Fetch order number for clear audit logging if not passed
+  let orderNumber = passedOrderNumber;
+  if (!orderNumber) {
+    const orderRecord = await db.order.findUnique({
+      where: { id: Number(orderId) },
+      select: { orderNumber: true },
+    });
+    orderNumber = orderRecord?.orderNumber || `ID#${orderId}`;
+  }
 
-  // Execute atomic stock deductions and audit logs
+  // Execute atomic stock deductions and audit logs in batch
+  const auditLogsToCreate = [];
   const transitions = [];
   for (const [ingredientId, { total: deduction, unitCost, name, baseUnit }] of requiredByIngredient.entries()) {
     const row = inventoryByIngredient.get(ingredientId);
@@ -857,19 +861,17 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
       data: { quantity: after },
     });
 
-    await db.inventoryAuditLog.create({
-      data: {
-        inventoryItemId: row.id,
-        actionType: 'ORDER_DEDUCTION',
-        quantityBefore: before,
-        quantityAfter: after,
-        quantityChanged: -deduction,
-        unitCost: unitCost > 0 ? unitCost : null,
-        totalCost: totalDeductionCost > 0 ? totalDeductionCost : null,
-        orderId: Number(orderId),
-        referenceNo: orderNumber,
-        note: `Auto-deducted for order ${orderNumber}`,
-      },
+    auditLogsToCreate.push({
+      inventoryItemId: row.id,
+      actionType: 'ORDER_DEDUCTION',
+      quantityBefore: before,
+      quantityAfter: after,
+      quantityChanged: -deduction,
+      unitCost: unitCost > 0 ? unitCost : null,
+      totalCost: totalDeductionCost > 0 ? totalDeductionCost : null,
+      orderId: Number(orderId),
+      referenceNo: orderNumber,
+      note: `Auto-deducted for order ${orderNumber}`,
     });
 
     const transition = await notificationService.evaluateAndClaimTransition(db, {
@@ -883,19 +885,23 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
     if (transition) transitions.push(transition);
   }
 
-  // Update snapshot COGS on OrderItems and Order
-  for (const itemCogs of itemCogsList) {
-    if (itemCogs.orderItemId) {
-      await db.orderItem.update({
-        where: { id: itemCogs.orderItemId },
-        data: {
-          unitCost: itemCogs.unitCost,
-          cogs: itemCogs.cogs,
-        },
-      });
-    } else {
-      // Find matching order item line for this order
-      await db.orderItem.updateMany({
+  if (auditLogsToCreate.length > 0) {
+    await db.inventoryAuditLog.createMany({ data: auditLogsToCreate });
+  }
+
+  // Update snapshot COGS on OrderItems in parallel
+  await Promise.all(
+    itemCogsList.map((itemCogs) => {
+      if (itemCogs.orderItemId) {
+        return db.orderItem.update({
+          where: { id: itemCogs.orderItemId },
+          data: {
+            unitCost: itemCogs.unitCost,
+            cogs: itemCogs.cogs,
+          },
+        });
+      }
+      return db.orderItem.updateMany({
         where: {
           orderId: Number(orderId),
           menuItemId: itemCogs.menuItemId,
@@ -905,8 +911,8 @@ async function deductInventoryForOrder({ tx, branchId, orderId, items }) {
           cogs: itemCogs.cogs,
         },
       });
-    }
-  }
+    })
+  );
 
   // Snapshot total COGS on Order
   await db.order.update({
@@ -1225,6 +1231,85 @@ async function getAuditLogs({ branchId, actionType, from, to, limit = 100 }, req
 }
 
 /**
+ * Evaluates branch product availability for all menu items whose recipe uses the specified ingredient.
+ */
+async function getAffectedProductServings(ingredientId, sourceBranchId, destBranchId) {
+  try {
+    const ingId = Number(ingredientId);
+    if (!ingId) return { affectedMenuItemIds: [], sourceMap: new Map(), destMap: new Map(), recipeItems: [] };
+
+    const recipes = await prisma.menuItemRecipeIngredient.findMany({
+      where: { ingredientId: ingId },
+      select: {
+        menuItemId: true,
+        menuItem: { select: { id: true, name: true } },
+      },
+    });
+
+    const affectedMenuItemIds = [...new Set(recipes.map((r) => r.menuItemId).filter(Boolean))];
+    if (!affectedMenuItemIds.length) {
+      return { affectedMenuItemIds: [], sourceMap: new Map(), destMap: new Map(), recipeItems: [] };
+    }
+
+    const menuService = require('../menu/menu.service');
+    const [sourceMap, destMap] = await Promise.all([
+      sourceBranchId ? menuService.evaluateBranchProductAvailability(affectedMenuItemIds, Number(sourceBranchId)) : Promise.resolve(new Map()),
+      destBranchId ? menuService.evaluateBranchProductAvailability(affectedMenuItemIds, Number(destBranchId)) : Promise.resolve(new Map()),
+    ]);
+
+    return { affectedMenuItemIds, sourceMap, destMap, recipeItems: recipes };
+  } catch (err) {
+    console.warn('[InventoryService] Could not evaluate affected product servings:', err.message);
+    return { affectedMenuItemIds: [], sourceMap: new Map(), destMap: new Map(), recipeItems: [] };
+  }
+}
+
+function buildAffectedProductsSummary(affectedMenuItemIds, preSourceMap, postSourceMap, preDestMap, postDestMap, recipeItems = []) {
+  if (!affectedMenuItemIds || !affectedMenuItemIds.length) {
+    return { affectedMenuItemIds: [], sourceBranch: [], destBranch: [] };
+  }
+
+  const getItemName = (id, post, pre) => {
+    return (
+      post?.menuItemName ||
+      pre?.menuItemName ||
+      recipeItems.find((r) => r.menuItemId === id)?.menuItem?.name ||
+      `Product #${id}`
+    );
+  };
+
+  return {
+    affectedMenuItemIds,
+    sourceBranch: affectedMenuItemIds.map((id) => {
+      const pre = preSourceMap ? preSourceMap.get(id) : null;
+      const post = postSourceMap ? postSourceMap.get(id) : null;
+      return {
+        menuItemId: id,
+        name: getItemName(id, post, pre),
+        previousServings: pre?.availableServings ?? 0,
+        availableServings: post?.availableServings ?? 0,
+        difference: (post?.availableServings ?? 0) - (pre?.availableServings ?? 0),
+        isStockAvailable: post?.isStockAvailable ?? false,
+        limitingIngredient: post?.limitingIngredient ?? null,
+      };
+    }),
+    destBranch: affectedMenuItemIds.map((id) => {
+      const pre = preDestMap ? preDestMap.get(id) : null;
+      const post = postDestMap ? postDestMap.get(id) : null;
+      return {
+        menuItemId: id,
+        name: getItemName(id, post, pre),
+        previousServings: pre?.availableServings ?? 0,
+        availableServings: post?.availableServings ?? 0,
+        difference: (post?.availableServings ?? 0) - (pre?.availableServings ?? 0),
+        isStockAvailable: post?.isStockAvailable ?? false,
+        limitingIngredient: post?.limitingIngredient ?? null,
+      };
+    }),
+  };
+}
+
+/**
  * Transfer inventory stock from one branch to another atomically with automated gram conversion support.
  */
 async function transferInventory(payload, requestingUser) {
@@ -1326,6 +1411,8 @@ async function transferInventory(payload, requestingUser) {
   }
 
   const transferNo = `TRF-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+  const preEvaluation = await getAffectedProductServings(ingId, sBranchId, dBranchId);
 
   const result = await prisma.$transaction(async (tx) => {
     // 1. Pessimistically lock and inspect source item (prevents concurrent race conditions)
@@ -1494,6 +1581,16 @@ async function transferInventory(payload, requestingUser) {
     return { transfer, transitions: [sourceTransition, destTransition] };
   });
 
+  const postEvaluation = await getAffectedProductServings(ingId, sBranchId, dBranchId);
+  result.transfer.affectedProducts = buildAffectedProductsSummary(
+    preEvaluation.affectedMenuItemIds,
+    preEvaluation.sourceMap,
+    postEvaluation.sourceMap,
+    preEvaluation.destMap,
+    postEvaluation.destMap,
+    preEvaluation.recipeItems
+  );
+
   await notificationService.processTransitionsSafely(result.transitions);
   return result.transfer;
 }
@@ -1528,6 +1625,14 @@ async function getTransfers({ branchId, status, limit = 50 }, requestingUser) {
 async function cancelTransfer(transferId, requestingUser) {
   const trfId = Number(transferId);
   if (!trfId || trfId < 1) throw { statusCode: 400, message: 'Invalid transfer ID.' };
+
+  const existingTransfer = await prisma.inventoryTransfer.findUnique({
+    where: { id: trfId },
+  });
+
+  const preEvaluation = existingTransfer
+    ? await getAffectedProductServings(existingTransfer.ingredientId, existingTransfer.sourceBranchId, existingTransfer.destBranchId)
+    : { affectedMenuItemIds: [], sourceMap: new Map(), destMap: new Map(), recipeItems: [] };
 
   const result = await prisma.$transaction(async (tx) => {
     const transfer = await tx.inventoryTransfer.findUnique({
@@ -1647,6 +1752,20 @@ async function cancelTransfer(transferId, requestingUser) {
 
     return { transfer: updatedTransfer, transitions: [sourceTransition, destTransition] };
   });
+
+  const postEvaluation = await getAffectedProductServings(
+    result.transfer.ingredientId,
+    result.transfer.sourceBranchId,
+    result.transfer.destBranchId
+  );
+  result.transfer.affectedProducts = buildAffectedProductsSummary(
+    preEvaluation.affectedMenuItemIds,
+    preEvaluation.sourceMap,
+    postEvaluation.sourceMap,
+    preEvaluation.destMap,
+    postEvaluation.destMap,
+    preEvaluation.recipeItems
+  );
 
   await notificationService.processTransitionsSafely(result.transitions);
   return result.transfer;
@@ -1809,4 +1928,6 @@ module.exports = {
   getInventoryItemDependencies,
   deleteInventoryItem,
   resolveIngredientGramConversion,
+  getAffectedProductServings,
+  buildAffectedProductsSummary,
 };

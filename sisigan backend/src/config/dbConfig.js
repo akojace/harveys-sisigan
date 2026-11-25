@@ -6,6 +6,36 @@
 const dns = require('dns');
 
 /**
+ * Ensures optimal connection pooling parameters are attached to the MySQL connection URL.
+ * Prevents Prisma from defaulting to a restrictive connection_limit (e.g. 3) on low-core containers.
+ */
+function ensureOptimalConnectionParams(rawUrl) {
+  if (!rawUrl) return rawUrl;
+  try {
+    const parsed = new URL(rawUrl);
+    let modified = false;
+    if (!parsed.searchParams.has('connection_limit')) {
+      parsed.searchParams.set('connection_limit', '10');
+      modified = true;
+    }
+    if (!parsed.searchParams.has('connect_timeout')) {
+      parsed.searchParams.set('connect_timeout', '15');
+      modified = true;
+    }
+    if (!parsed.searchParams.has('pool_timeout')) {
+      parsed.searchParams.set('pool_timeout', '20');
+      modified = true;
+    }
+    if (modified) {
+      return parsed.toString();
+    }
+  } catch {
+    // Retain rawUrl if parsing fails
+  }
+  return rawUrl;
+}
+
+/**
  * Parses and sanitizes database connection information.
  * Supports:
  *   1. DATABASE_URL (standard Prisma format: mysql://user:pass@host:port/dbname?params)
@@ -33,6 +63,12 @@ function getDatabaseConfig() {
       url = `mysql://${auth}@${host}:${port}/${database}?connection_limit=10&connect_timeout=15&pool_timeout=20${sslParam}`;
       // Set DATABASE_URL in process.env so Prisma can pick it up
       process.env.DATABASE_URL = url;
+    }
+  } else {
+    const optimized = ensureOptimalConnectionParams(url);
+    if (optimized !== url) {
+      url = optimized;
+      process.env.DATABASE_URL = optimized;
     }
   }
 

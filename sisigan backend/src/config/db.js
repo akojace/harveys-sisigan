@@ -8,6 +8,9 @@ const {
   getSanitizedDbInfo,
   diagnoseDatabaseConnection,
 } = require('./dbConfig');
+const {
+  attachPrismaPerformanceMiddleware,
+} = require('../middleware/performance.middleware');
 
 // Ensure DATABASE_URL is initialized (either from DATABASE_URL or DB_* environment variables)
 const resolvedDbUrl = getDatabaseConfig();
@@ -30,6 +33,8 @@ const prisma =
         ? ['error', 'warn']
         : ['error'],
   });
+
+attachPrismaPerformanceMiddleware(prisma);
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.__prisma = prisma;

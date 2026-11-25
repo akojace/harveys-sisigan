@@ -440,11 +440,17 @@ function TransferStockModal({ isOwner, branches, userBranchId, inventory, onClos
       }
 
       const res = await inventoryApi.transfer(payload)
+      const affectedSource = res.data?.affectedProducts?.sourceBranch || []
+      let servingMsg = ''
+      if (affectedSource.length > 0) {
+        const top = affectedSource.slice(0, 2)
+        servingMsg = ` • POS servings updated: ${top.map(p => `${p.name}: ${p.availableServings} in source`).join(', ')}`
+      }
 
       setSuccess(
         isGramConverted
-          ? `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q.toLocaleString()} orders (${calculatedGrams.toLocaleString()} g).`
-          : `Transfer successful! Reference: ${res.data?.transferNo || 'Completed'}. Transferred ${q} ${unit}.`
+          ? `Transfer successful! Ref: ${res.data?.transferNo || 'Completed'}. Transferred ${q.toLocaleString()} orders (${calculatedGrams.toLocaleString()} g)${servingMsg}.`
+          : `Transfer successful! Ref: ${res.data?.transferNo || 'Completed'}. Transferred ${q} ${unit}${servingMsg}.`
       )
       setTimeout(() => {
         onSaved()

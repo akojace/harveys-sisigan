@@ -831,7 +831,7 @@ export default function OrdersPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await ordersApi.list({ status: filter, limit: 500 })
+      const data = await ordersApi.list({ status: filter, limit: 50 })
       const sorted = (data.orders || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       setOrders(sorted)
     } finally {

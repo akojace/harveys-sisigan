@@ -84,6 +84,7 @@ async function evaluateBranchProductAvailability(menuItemIds, branchId) {
     where: { menuItemId: { in: menuItemIds } },
     include: {
       ingredient: { select: { id: true, name: true, unit: true, defaultMinThreshold: true } },
+      menuItem: { select: { id: true, name: true } },
     },
     orderBy: { ingredient: { name: 'asc' } },
   });
@@ -122,6 +123,8 @@ async function evaluateBranchProductAvailability(menuItemIds, branchId) {
     if (itemRecipes.length === 0) {
       availabilityMap.set(itemId, {
         branchId: bId,
+        menuItemId: itemId,
+        menuItemName: null,
         hasRecipe: false,
         isBranchEnabled,
         isStockAvailable: false,
@@ -141,6 +144,8 @@ async function evaluateBranchProductAvailability(menuItemIds, branchId) {
     if (!bId) {
       availabilityMap.set(itemId, {
         branchId: null,
+        menuItemId: itemId,
+        menuItemName: itemRecipes[0]?.menuItem?.name || null,
         hasRecipe: true,
         isBranchEnabled: true,
         isStockAvailable: false,
@@ -187,9 +192,10 @@ async function evaluateBranchProductAvailability(menuItemIds, branchId) {
 
       // Factor in preparation yield / trimming loss
       const effectiveNeeded = yf > 0 ? baseNeeded / yf : baseNeeded;
+      const ratio = effectiveNeeded > 0 ? currentStock / effectiveNeeded : 0;
       const servings =
         !unitError && effectiveNeeded > 0
-          ? Math.floor(currentStock / effectiveNeeded)
+          ? Math.floor(roundDecimals(ratio, 6))
           : 0;
 
       if (servings < minServings) {
@@ -221,6 +227,7 @@ async function evaluateBranchProductAvailability(menuItemIds, branchId) {
         inventoryUnit: baseUnit,
         yieldFactor: yf,
         requiredPerServing: roundDecimals(effectiveNeeded, 4),
+        required: roundDecimals(effectiveNeeded, 4),
         currentStock: roundDecimals(currentStock, 4),
         possibleServings: servings,
         status: ingStatus,
@@ -269,6 +276,8 @@ async function evaluateBranchProductAvailability(menuItemIds, branchId) {
 
     availabilityMap.set(itemId, {
       branchId: bId,
+      menuItemId: itemId,
+      menuItemName: itemRecipes[0]?.menuItem?.name || null,
       hasRecipe: true,
       isBranchEnabled,
       isStockAvailable,
@@ -356,6 +365,7 @@ async function getMenuWithCategories({
         hasRecipe: avail.hasRecipe,
         availabilityStatus: status,
         outOfStockIngredients: avail.outOfStockIngredients,
+        ingredients: avail.ingredients || [],
         branchId: branchId ? Number(branchId) : null,
       };
     });

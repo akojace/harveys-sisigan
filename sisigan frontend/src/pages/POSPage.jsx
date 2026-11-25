@@ -584,6 +584,32 @@ export default function POSPage() {
   }
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
 
+  // Pre-populates stock info from batch-evaluated menu categories
+  // Eliminates N+1 HTTP calls on category switching
+  const populateStockFromCategories = useCallback((categories) => {
+    if (!categories || !categories.length) return
+    const stockMap = {}
+    categories.forEach(cat => {
+      (cat.items || []).forEach(item => {
+        stockMap[item.id] = {
+          hasRecipe: item.hasRecipe,
+          canOrder: item.isAvailable,
+          availableServings: item.availableServings,
+          limitingIngredient: item.limitingIngredient,
+          limitingIngredients: item.limitingIngredients || [],
+          outOfStockIngredients: item.outOfStockIngredients || [],
+          status: item.availabilityStatus,
+          ingredients: (item.ingredients || []).map(ing => ({
+            ...ing,
+            required: ing.requiredPerServing || ing.required,
+          })),
+        }
+        fetchedIds.current.add(item.id)
+      })
+    })
+    setStockInfo(prev => ({ ...prev, ...stockMap }))
+  }, [])
+
   // Branch-scoped menu loading with persistent cache-first instant loading
   const loadMenu = useCallback(() => {
     if (!branchId) return
@@ -602,13 +628,15 @@ export default function POSPage() {
           }
         },
         onBackgroundUpdate: (freshMenu) => {
-          setMenu(freshMenu || [])
-          if (freshMenu?.length) {
-            setActiveCategory(prev => (freshMenu.some(c => c.id === prev) ? prev : freshMenu[0].id))
+          const freshData = freshMenu || []
+          setMenu(freshData)
+          populateStockFromCategories(freshData)
+          if (freshData.length) {
+            setActiveCategory(prev => (freshData.some(c => c.id === prev) ? prev : freshData[0].id))
           }
           // Validate & sync cart prices against fresh server data
           const itemMap = new Map()
-          freshMenu.flatMap(c => c.items || []).forEach(item => itemMap.set(item.id, item))
+          freshData.flatMap(c => c.items || []).forEach(item => itemMap.set(item.id, item))
           setCart(prevCart => {
             let changed = false
             const nextCart = prevCart.map(ci => {
@@ -624,13 +652,13 @@ export default function POSPage() {
             }
             return nextCart
           })
-          // Invalidate fetched live stock cache so fresh ingredients re-evaluate
-          fetchedIds.current.clear()
         },
       }
     ).then(res => {
-      setMenu(res.data || [])
-      if (res.data?.length) setActiveCategory(prev => prev ?? res.data[0].id)
+      const data = res.data || []
+      setMenu(data)
+      populateStockFromCategories(data)
+      if (data.length) setActiveCategory(prev => prev ?? data[0].id)
       setSyncState({
         status: res.fromCache ? (res.networkPromise ? 'syncing' : 'cached') : 'synced',
         isBackgroundSyncing: !!res.networkPromise,
@@ -643,13 +671,53 @@ export default function POSPage() {
       setIsMenuLoading(false)
       setError('Failed to load menu: ' + err.message)
     })
-  }, [branchId])
+  }, [branchId, populateStockFromCategories])
 
   useEffect(() => {
     fetchedIds.current.clear()
     setStockInfo({})
     setCart([])
     loadMenu()
+  }, [branchId, loadMenu])
+
+  // Real-time synchronization: listen for stock transfers / inventory movements
+  useEffect(() => {
+    function handleCacheCleared(e) {
+      const affectedBranch = e?.detail?.branchId
+      if (affectedBranch == null || Number(affectedBranch) === Number(branchId)) {
+        fetchedIds.current.clear()
+        setStockInfo({})
+        loadMenu()
+      }
+    }
+
+    window.addEventListener('sisigan:menu-cache-cleared', handleCacheCleared)
+
+    let channel = null
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        channel = new BroadcastChannel('sisigan_menu_sync')
+        channel.onmessage = (msg) => {
+          if (msg?.data?.type === 'MENU_CACHE_CLEARED') {
+            const affectedBranch = msg.data.branchId
+            if (affectedBranch == null || Number(affectedBranch) === Number(branchId)) {
+              fetchedIds.current.clear()
+              setStockInfo({})
+              loadMenu()
+            }
+          }
+        }
+      } catch {
+        // Ignore channel errors
+      }
+    }
+
+    return () => {
+      window.removeEventListener('sisigan:menu-cache-cleared', handleCacheCleared)
+      if (channel) {
+        channel.close()
+      }
+    }
   }, [branchId, loadMenu])
 
   // Stock fetching per category for current active branch
@@ -1248,15 +1316,15 @@ export default function POSPage() {
                   <div className="kiosk-card-info">
                     <div className="kiosk-card-name">{item.name}</div>
                     <div className="kiosk-card-price">₱{Number(item.price).toFixed(0)}</div>
-                    {item.hasRecipe && item.availableServings != null && (
+                    {item.hasRecipe && (stockInfo[item.id]?.availableServings ?? item.availableServings) != null && (
                       <div style={{
                         fontSize: 11,
                         fontWeight: 700,
-                        color: item.availableServings <= 0 ? '#dc2626' : item.availableServings <= 10 ? '#b45309' : '#15803d',
+                        color: (stockInfo[item.id]?.availableServings ?? item.availableServings) <= 0 ? '#dc2626' : (stockInfo[item.id]?.availableServings ?? item.availableServings) <= 10 ? '#b45309' : '#15803d',
                         marginTop: 2,
                       }}>
-                        {item.availableServings > 0
-                          ? `${item.availableServings} servings available`
+                        {(stockInfo[item.id]?.availableServings ?? item.availableServings) > 0
+                          ? `${stockInfo[item.id]?.availableServings ?? item.availableServings} servings available`
                           : '0 servings left'}
                       </div>
                     )}

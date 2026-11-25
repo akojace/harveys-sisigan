@@ -208,6 +208,28 @@ export async function clearMenuCache(branchId = null) {
   } catch (e) {
     console.warn('[MenuCache] Error clearing localStorage:', e.message);
   }
+
+  // Broadcast cache invalidation across windows, tabs, and reactive components
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('sisigan:menu-cache-cleared', {
+          detail: { branchId: branchId != null ? Number(branchId) : null },
+        })
+      );
+      if ('BroadcastChannel' in window) {
+        const channel = new BroadcastChannel('sisigan_menu_sync');
+        channel.postMessage({
+          type: 'MENU_CACHE_CLEARED',
+          branchId: branchId != null ? Number(branchId) : null,
+          timestamp: Date.now(),
+        });
+        channel.close();
+      }
+    } catch {
+      // Ignore broadcast errors in unsupported environments
+    }
+  }
 }
 
 /**

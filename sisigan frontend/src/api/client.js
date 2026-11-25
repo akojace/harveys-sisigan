@@ -219,9 +219,21 @@ export const ordersApi = {
     return request(`/orders${q ? '?' + q : ''}`)
   },
   get:           (id)          => request(`/orders/${id}`),
-  create:        (data)        => request('/orders',               { method: 'POST',  body: JSON.stringify(data) }),
-  updateStatus:  (id, status)  => request(`/orders/${id}/status`,  { method: 'PATCH', body: JSON.stringify({ status }) }),
-  cancel:        (id)          => request(`/orders/${id}`,         { method: 'DELETE' }),
+  create:        async (data)  => {
+    const res = await request('/orders', { method: 'POST', body: JSON.stringify(data) })
+    if (data.branchId) await clearMenuCache(data.branchId)
+    return res
+  },
+  updateStatus:  async (id, status) => {
+    const res = await request(`/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })
+    await clearMenuCache()
+    return res
+  },
+  cancel:        async (id)    => {
+    const res = await request(`/orders/${id}`, { method: 'DELETE' })
+    await clearMenuCache()
+    return res
+  },
   pay:           (id, data)    => request(`/orders/${id}/payment`, { method: 'POST',  body: JSON.stringify(data) }),
 }
 
@@ -233,18 +245,41 @@ export const inventoryApi = {
   create: (data) => request('/inventory', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/inventory/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   updateDetails: (id, data) => request(`/inventory/${id}/details`, { method: 'PATCH', body: JSON.stringify(data) }),
-  restock: (data) => request('/inventory/restock', { method: 'POST', body: JSON.stringify(data) }),
-  adjust: (data) => request('/inventory/adjust', { method: 'POST', body: JSON.stringify(data) }),
-  transfer: (data) => request('/inventory/transfers', { method: 'POST', body: JSON.stringify(data) }),
+  restock: async (data) => {
+    const res = await request('/inventory/restock', { method: 'POST', body: JSON.stringify(data) })
+    if (data.branchId) await clearMenuCache(data.branchId)
+    else await clearMenuCache()
+    return res
+  },
+  adjust: async (data) => {
+    const res = await request('/inventory/adjust', { method: 'POST', body: JSON.stringify(data) })
+    if (data.branchId) await clearMenuCache(data.branchId)
+    else await clearMenuCache()
+    return res
+  },
+  transfer: async (data) => {
+    const res = await request('/inventory/transfers', { method: 'POST', body: JSON.stringify(data) })
+    if (data.sourceBranchId) await clearMenuCache(data.sourceBranchId)
+    if (data.destBranchId) await clearMenuCache(data.destBranchId)
+    return res
+  },
   transfers: (params = {}) => {
     const q = new URLSearchParams(params).toString()
     return request(`/inventory/transfers${q ? '?' + q : ''}`)
   },
-  cancelTransfer: (id) => request(`/inventory/transfers/${id}/cancel`, { method: 'POST' }),
+  cancelTransfer: async (id) => {
+    const res = await request(`/inventory/transfers/${id}/cancel`, { method: 'POST' })
+    await clearMenuCache()
+    return res
+  },
   dependencies: (id, branchId) =>
     request(`/inventory/${id}/dependencies${branchId ? `?branchId=${branchId}` : ''}`),
-  remove: (id, branchId) =>
-    request(`/inventory/${id}${branchId ? `?branchId=${branchId}` : ''}`, { method: 'DELETE' }),
+  remove: async (id, branchId) => {
+    const res = await request(`/inventory/${id}${branchId ? `?branchId=${branchId}` : ''}`, { method: 'DELETE' })
+    if (branchId) await clearMenuCache(branchId)
+    else await clearMenuCache()
+    return res
+  },
 }
 
 export const expensesApi = {

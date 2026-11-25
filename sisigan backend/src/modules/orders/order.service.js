@@ -162,6 +162,7 @@ async function createOrder({ items, type, tableNumber, customerName, notes, bran
           tx,
           branchId: Number(branchId),
           orderId: createdOrder.id,
+          orderNumber: createdOrder.orderNumber,
           items: createdOrder.items.map((item) => ({
             menuItemId: item.menuItemId,
             quantity: item.quantity,
@@ -333,6 +334,7 @@ async function updateOrderStatus(orderId, newStatus, { userRole, userBranchId, a
         tx,
         branchId: order.branchId,
         orderId: order.id,
+        orderNumber: order.orderNumber,
         items: order.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, orderItemId: i.id })),
       });
       if (res?.transitions?.length) transitions.push(...res.transitions);
@@ -491,6 +493,7 @@ async function processPayment({ orderId, payments, method, amountPaid, reference
         tx,
         branchId: order.branchId,
         orderId: order.id,
+        orderNumber: order.orderNumber,
         items: order.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, orderItemId: i.id })),
       });
       transitions = res?.transitions || [];

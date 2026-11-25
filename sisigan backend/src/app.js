@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
+const { performanceMiddleware } = require('./middleware/performance.middleware');
 const authRoutes      = require('./modules/auth/auth.routes');
 const menuRoutes      = require('./modules/menu/menu.routes');
 const orderRoutes     = require('./modules/orders/order.routes');
@@ -22,6 +23,9 @@ const { getCorsOptions } = require('./config/corsConfig');
 const prisma = require('./config/db');
 
 const app = express();
+
+// ── Performance & Request Tracking ────────────────────
+app.use(performanceMiddleware);
 
 // ── Core Middleware ───────────────────────────────────
 app.use(cors(getCorsOptions()));
