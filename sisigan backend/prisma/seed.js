@@ -76,7 +76,7 @@ function getInventorySeedItems() {
     { name: 'Mayonnaise', category: 'SAUCE', unit: 'TUB', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 180.00 },
 
     // SPICES
-    { name: 'Sili (Red & Green)', category: 'SPICES', unit: 'GRAM', quantity: 300, consumptionDays: 3, consumptionLabel: '2-3 days', price: 0.25 },
+    { name: 'Sili (Red & Green)', category: 'SPICES', unit: 'GRAM', quantity: 300, consumptionDays: 3, consumptionLabel: '2-3 days', price: 0.25, gramsPerUnit: 100 },
     { name: 'Paminta', category: 'SPICES', unit: 'PACK', quantity: 1, consumptionDays: 1, consumptionLabel: 'Daily', price: 50.00 },
 
     // MAIN INGREDIENTS
@@ -88,7 +88,7 @@ function getInventorySeedItems() {
 
     // RICE
     // 1 bag = 50,000 grams @ ₱1,350 purchase cost -> Unit Cost = 1350 / 50000 = ₱0.027 per gram
-    { name: 'Bigas', category: 'RICE', unit: 'GRAM', quantity: 50000, consumptionDays: 2, consumptionLabel: '1 bag (2 days)', price: 0.027 },
+    { name: 'Bigas', category: 'RICE', unit: 'GRAM', quantity: 50000, consumptionDays: 2, consumptionLabel: '1 bag (2 days)', price: 0.027, gramsPerUnit: 100 },
 
     // UTILITIES
     { name: 'Tubig', category: 'UTILITIES', unit: 'GALLON', quantity: 5, consumptionDays: 7, consumptionLabel: '1 week', price: 25.00 },
@@ -100,6 +100,7 @@ function getInventorySeedItems() {
     { name: 'LPG Gas (Pizza Oven)', category: 'GAS', unit: 'TANK', quantity: 1, consumptionDays: 180, consumptionLabel: '6 months', price: 900.00 },
   ].map((item) => ({
     ...item,
+    gramsPerUnit: item.unit === 'GRAM' ? (item.gramsPerUnit ?? 100) : (item.gramsPerUnit ?? null),
     dailyDeduction: item.consumptionDays ? round3(item.quantity / item.consumptionDays) : null,
     minThreshold: round3(item.quantity * 0.2),
   }));

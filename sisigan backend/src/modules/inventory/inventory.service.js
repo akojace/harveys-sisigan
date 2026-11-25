@@ -25,46 +25,36 @@ function startAndEndOfDay(date = new Date()) {
 
 /**
  * Automatically resolves the gram conversion factor for an ingredient.
- * Priority 1: Explicit Ingredient.gramsPerUnit (configured by administrator)
- * Priority 2: Existing Recipe BOM requirement (menu_item_recipes) where ingredient is portioned in GRAM or KG
- * Returns: { gramsPerUnit: number | null, source: 'CONFIGURED' | 'RECIPE' | 'NONE', description: string | null }
+ * Universal rule: ALL ingredients whose stock measurement unit is GRAM convert at 100 grams per transfer order/unit.
+ * Non-GRAM ingredients (ML, LITER, PCS, GALLON, TANK, BAG, PACK, TUB) are protected native units and do NOT convert to grams.
+ * Returns: { gramsPerUnit: number | null, source: 'UNIVERSAL_STANDARD' | 'CONFIGURED' | 'NONE', description: string | null }
  */
 function resolveIngredientGramConversion(ingredient) {
   if (!ingredient) {
     return { gramsPerUnit: null, source: 'NONE', description: null };
   }
 
-  // Priority 1: Explicit administrator configuration
-  if (ingredient.gramsPerUnit != null && Number(ingredient.gramsPerUnit) > 0) {
-    const gpu = roundDecimals(Number(ingredient.gramsPerUnit), 3);
+  // Universal conversion rule: ALL items whose stock measurement unit is GRAM convert at 100g per order/unit.
+  // Overrides old recipe BOM inference (80g, 150g, 200g) and enforces universal 100g standard across all gram items.
+  if (ingredient.unit === 'GRAM') {
     return {
-      gramsPerUnit: gpu,
-      source: 'CONFIGURED',
-      description: `${gpu.toLocaleString()} g per order (configured)`,
+      gramsPerUnit: 100.000,
+      source: 'UNIVERSAL_STANDARD',
+      description: '100 g per order (universal standard)',
     };
   }
 
-  // Priority 2: Automatically identify from existing recipe BOM (menu_item_recipes)
-  if (Array.isArray(ingredient.recipes) && ingredient.recipes.length > 0) {
-    // Look for recipes using GRAM or KG
-    const gramRecipes = ingredient.recipes.filter((r) => {
-      const u = r.unit || ingredient.unit;
-      return (u === 'GRAM' || u === 'KG') && Number(r.quantity) > 0;
-    });
-
-    if (gramRecipes.length > 0) {
-      const rep = gramRecipes[0];
-      const u = rep.unit || ingredient.unit;
-      const portionGrams = u === 'KG' ? roundDecimals(Number(rep.quantity) * 1000, 3) : roundDecimals(Number(rep.quantity), 3);
-      if (portionGrams > 0) {
-        const menuName = rep.menuItem?.name ? `recipe for ${rep.menuItem.name}` : 'recipe BOM';
-        return {
-          gramsPerUnit: portionGrams,
-          source: 'RECIPE',
-          description: `${portionGrams.toLocaleString()} g per order (from ${menuName})`,
-        };
-      }
-    }
+  // Non-GRAM items (ML, LITER, PCS, GALLON, TANK, BAG, PACK, TUB) are protected native units.
+  // KG converts at 1000g per unit if present
+  if (ingredient.unit === 'KG') {
+    const gpu = ingredient.gramsPerUnit != null && Number(ingredient.gramsPerUnit) > 0
+      ? roundDecimals(Number(ingredient.gramsPerUnit), 3)
+      : 1000.000;
+    return {
+      gramsPerUnit: gpu,
+      source: 'CONFIGURED',
+      description: `${gpu.toLocaleString()} g per unit (KG)`,
+    };
   }
 
   return {
@@ -565,6 +555,9 @@ async function createInventoryItem(payload, requestingUser) {
       throw { statusCode: 400, message: 'gramsPerUnit must be a positive number greater than zero.' };
     }
     gpu = parsedGpu;
+  } else if (unit === 'GRAM') {
+    // Universal 100g conversion rule for all GRAM items
+    gpu = 100.000;
   }
 
   const row = await prisma.$transaction(async (tx) => {
@@ -578,7 +571,7 @@ async function createInventoryItem(payload, requestingUser) {
         ...(consumptionLabel && { defaultConsumptionLabel: consumptionLabel }),
         ...(daily !== null && { defaultDailyDeduction: daily }),
         ...(p !== null && { defaultPrice: p }),
-        ...(gpu !== null && { gramsPerUnit: gpu }),
+        ...(gpu !== null ? { gramsPerUnit: gpu } : unit === 'GRAM' ? { gramsPerUnit: 100.000 } : {}),
         defaultMinThreshold: min,
       },
       create: {
@@ -591,7 +584,7 @@ async function createInventoryItem(payload, requestingUser) {
         defaultDailyDeduction: daily,
         defaultPrice: p,
         defaultMinThreshold: min,
-        gramsPerUnit: gpu,
+        gramsPerUnit: gpu !== null ? gpu : (unit === 'GRAM' ? 100.000 : null),
       },
     });
 

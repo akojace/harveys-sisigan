@@ -400,9 +400,12 @@ function TransferStockModal({ isOwner, branches, userBranchId, initialBranchId, 
 
   const selectedItem = availableItems.find((i) => Number(i.ingredientId) === Number(ingredientId))
   const unit = selectedItem?.ingredient?.unit || 'GRAM'
-  const gpu = selectedItem?.ingredient?.gramsPerUnit ? Number(selectedItem.ingredient.gramsPerUnit) : null
+  const isGramUnit = unit === 'GRAM'
+  const gpu = selectedItem?.ingredient?.gramsPerUnit
+    ? Number(selectedItem.ingredient.gramsPerUnit)
+    : (isGramUnit ? 100 : null)
   const conversionSource = selectedItem?.ingredient?.conversionSource
-  const conversionDesc = selectedItem?.ingredient?.conversionDescription
+  const conversionDesc = selectedItem?.ingredient?.conversionDescription || (isGramUnit ? '100 g per order (universal standard)' : null)
   const isGramItem = unit === 'GRAM' || unit === 'KG'
   const isGramConverted = gpu !== null && gpu > 0
   const isMissingConversion = isGramItem && !isGramConverted
@@ -533,14 +536,13 @@ function TransferStockModal({ isOwner, branches, userBranchId, initialBranchId, 
           >
             <option value="">Select available ingredient...</option>
             {availableItems.map((item) => {
-              const itemGpu = item.ingredient?.gramsPerUnit ? Number(item.ingredient.gramsPerUnit) : null
               const itemUnit = item.ingredient?.unit
-              const isGram = itemUnit === 'GRAM' || itemUnit === 'KG'
+              const itemGpu = item.ingredient?.gramsPerUnit
+                ? Number(item.ingredient.gramsPerUnit)
+                : (itemUnit === 'GRAM' ? 100 : null)
               let badge = ''
               if (itemGpu) {
                 badge = `(⚖️ ${itemGpu.toLocaleString()} g/order)`
-              } else if (isGram) {
-                badge = '(⚠️ No conversion factor)'
               }
               return (
                 <option key={item.id} value={item.ingredientId}>
